@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "cube.glsl.h": "c",
+        "handmademath.h": "c",
+        "sokol_gfx.h": "c"
+    }
+}

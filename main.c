@@ -1,16 +1,62 @@
+#include <assert.h>
+
 #define HANDMADE_MATH_IMPLEMENTATION
 #define HANDMADE_MATH_NO_SSE
 #include "lib/hmm/HandmadeMath.h"
-#include "lib/sokol/sokol.c"
+
+#define SOKOL_IMPL
+#define SOKOL_METAL
+#include "sokol_app.h"
+#include "sokol_gfx.h"
+#include "sokol_time.h"
+#include "sokol_audio.h"
+#include "sokol_fetch.h"
+#include "sokol_log.h"
+#include "sokol_glue.h"
+
 #include "shader/cube.glsl.h"
 
+// ECS
+#define NUM_COMPONENTS 16
+
+// Define component structs
+typedef struct {
+    hmm_vec3 position;
+} transform_c_t;
+
+// ECS Global struct
+static struct {
+    bool is_valid[NUM_COMPONENTS];
+    transform_c_t transforms[NUM_COMPONENTS];
+} ecs = {
+    .is_valid = {
+        [0 ... NUM_COMPONENTS-1] = false
+    }
+};
+
+// Component-specific functions
+void update_transform(int index, transform_c_t *data) {
+    ecs.is_valid[index] = true;
+    memcpy(&ecs.transforms[index], data, sizeof(transform_c_t));
+}
+
+// Global state
 static struct {
     float rx, ry;
     sg_pipeline pip;
     sg_bindings bind;
 } state;
 
+
+// Sokol init
 void init(void) {
+    update_transform(0, &(transform_c_t){
+        .position = HMM_Vec3(0.0f, 0.0f, 8.0f)
+    });
+    update_transform(0, &(transform_c_t){
+        .position = HMM_Vec3(0.0f, 0.0f, 5.0f)
+    });
+
     sg_setup(&(sg_desc){
         .context = sapp_sgcontext(),
         .logger.func = slog_func,
@@ -18,7 +64,7 @@ void init(void) {
 
     /* cube vertex buffer */
     float vertices[] = {
-        -1.0, -1.0, -1.0,   1.0, 0.0, 0.0, 1.0,
+        -2.0, -1.0, -1.0,   1.0, 0.0, 0.0, 1.0,
          1.0, -1.0, -1.0,   1.0, 0.0, 0.0, 1.0,
          1.0,  1.0, -1.0,   1.0, 0.0, 0.0, 1.0,
         -1.0,  1.0, -1.0,   1.0, 0.0, 0.0, 1.0,

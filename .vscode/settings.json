@@ -2,6 +2,11 @@
     "files.associations": {
         "cube.glsl.h": "c",
         "handmademath.h": "c",
-        "sokol_gfx.h": "c"
+        "sokol_gfx.h": "c",
+        "sokol_imgui.h": "c",
+        "cimgui.h": "c",
+        "sokol_app.h": "c",
+        "sokol_log.h": "c",
+        "filesystem": "c"
     }
 }

@@ -1,0 +1,1 @@
+ ../sokol-tools-bin/bin/osx_arm64/sokol-shdc --input shader/phong.glsl --output shader/phong.glsl.h --slang glsl330:hlsl5:metal_macos

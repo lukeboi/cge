@@ -20,17 +20,30 @@
 #include "sokol_imgui.h"
 
 #include "shader/cube.glsl.h"
-#include "shader/phong.glsl.h"
+// #include "shader/phong.glsl.h"
 
 // ECS
 // TODO this is all ugly
-#define NUM_COMPONENTS 128
+#define NUM_COMPONENTS 32
 
 // Define component structs
 typedef struct {
     hmm_vec3 position;
     hmm_vec3 rotation; // Euler angles
+    hmm_mat4 _transform; // Transform of the object based on position and rotation.
+    // When they disagree, the pos/rot always takes precedence and this tranform is just used for per-frame calculations
 } transform_c_t;
+
+typedef struct {
+    float _vertices[10000 * 3 * 8]; // Random big number, *should* be 10k verts, TODO malloc
+    uint16_t _indices[10000 * 8]; // Index values, random big number, TODO malloc
+    unsigned _verticies_size;
+    unsigned _indices_size;
+    unsigned face_count;
+    sg_buffer vbuf;
+    sg_buffer ibuf;
+    sg_bindings binding;
+} mesh_c_t;
 
 // ECS Global struct
 static struct {
@@ -41,14 +54,10 @@ static struct {
     // Object mesh buffer
     // TODO this should be malloced
     bool mesh_valid[NUM_COMPONENTS];
-    float meshes[NUM_COMPONENTS][10000 * 3 * 8]; // Random big number, *should* be 10k verts
+    mesh_c_t meshes[NUM_COMPONENTS];
 } ecs = {
-    .transforms_valid = {
-        [0 ... NUM_COMPONENTS-1] = false
-    },
-    .mesh_valid = {
-        [0 ... NUM_COMPONENTS-1] = false
-    }
+    .transforms_valid   = { [0 ... NUM_COMPONENTS-1] = false },
+    .mesh_valid         = { [0 ... NUM_COMPONENTS-1] = false }
 };
 
 // Component-specific functions
@@ -61,16 +70,23 @@ void update_transform(int index, transform_c_t *data) {
 static struct {
     ImFont* default_font;
     ImFont* main_font;
+    bool show_imgui_demo;
 } gui;
 
 static struct {
-    float rx, ry;
+    float cam_rx, cam_ry; // Latlong-esque camera rotations
+    float cam_fov;
+    bool cam_drift;
+    hmm_vec3 cam_pos;
     sg_pipeline pip;
     sg_bindings bind;
     sg_pipeline mesh_pip;
     sg_bindings mesh_bind;
     sg_pass_action pass_action;
-} state;
+} state = {
+    .cam_fov = 60.0f,
+    .cam_drift = false
+};
 
 fastObjMesh* mesh;
 
@@ -91,6 +107,9 @@ void init(void) {
     //     .position = HMM_Vec3(-2.0f, 0.0f, 0.0f)
     // });
 
+    // Camera set inital position
+    state.cam_pos = HMM_Vec3(0.0f, 1.5f, 20.0f);
+
     sg_setup(&(sg_desc){
         .context = sapp_sgcontext(),
         .logger.func = slog_func,
@@ -107,8 +126,8 @@ void init(void) {
     // TODO: Fix antialiasing/appears blurry on text
     ImGuiIO *io = igGetIO();
     gui.main_font = ImFontAtlas_AddFontFromFileTTF(io->Fonts, "assets/NotoSans-Regular.ttf", 16, NULL, NULL);
-    // io->FontGlobalScale = 0.1f;
-
+    // gui.main_font = ImFontAtlas_AddFontFromFileTTF(io->Fonts, "lib/cimgui/imgui/misc/fonts/Roboto-Medium.ttf", 16, NULL, NULL); // This works but is also blurry
+    
     // Create font atlas
     unsigned char* font_pixels;
     int font_width, font_height;
@@ -132,44 +151,95 @@ void init(void) {
     _simgui.default_font = simgui_make_image(&img_desc);
     io->Fonts->TexID = simgui_imtextureid(_simgui.default_font);
 
-
-    mesh = fast_obj_read("assets/cube.obj");
-
-    // int idx = 0;
-
-    // for (int i = 0; i < mesh->group_count; i++) {
-    //     fastObjGroup group = mesh->groups[i];
-    //     for (int j = 0; j < group.face_count; j++) {
-    //         int num_verticies = mesh->face_vertices[group.face_offset + j];
-    //         for (int k = 0; k < num_verticies; k++) {
-    //             fastObjIndex mi = mesh->indices[group.index_offset + idx];
-    //             printf("%d\n", mi.p);
-    //             // m->positions[3 * mi.p + 0];
-    //             // idx++;
-    //         }
-    //     }
-    // }
-
+    mesh = fast_obj_read("assets/monkey.obj");
     int face_count = mesh->face_count;
 
-    for (unsigned int i = 0; i < mesh->face_count * 3; ++i) {
-        fastObjIndex vertex = mesh->indices[i];
-
-        unsigned int pos = i * 8;
-        unsigned int v_pos = vertex.p * 3;
-        unsigned int n_pos = vertex.n * 3;
-        unsigned int t_pos = vertex.t * 2;
-
-        memcpy(ecs.meshes[0] + pos, mesh->positions + v_pos, 3 * sizeof(float));
-        memcpy(ecs.meshes[0] + pos + 3, mesh->normals + n_pos, 3 * sizeof(float));
-        memcpy(ecs.meshes[0] + pos + 6, mesh->texcoords + t_pos, 2 * sizeof(float));
+    for(int i = 0; i < mesh->index_count; i++) {
+        printf("= %d\n", mesh->indices[i].p);
+        ecs.meshes[0]._indices[i] = mesh->indices[i].p;
     }
-    ecs.mesh_valid[0] = true;
+    ecs.meshes[0]._indices_size = mesh->index_count;
+    ecs.meshes[0].face_count = mesh->face_count;
 
+    {
+        unsigned int i = 0; // Keep i def outside loop to use it to get size
+        // for (i = 0; i < mesh->face_count * 3; ++i) {
+        //     fastObjIndex vertex = mesh->indices[i];
+
+        //     // unsigned int v_pos = vertex.p * 3;
+        //     unsigned int v_pos = vertex.p;
+        //     unsigned int n_pos = vertex.n * 3;
+        //     unsigned int t_pos = vertex.t * 2;
+
+        //     // // From opengl tutorial
+        //     // unsigned int pos = i * 8;
+
+        //     // memcpy(ecs.meshes[0].vertices + pos, mesh->positions + v_pos, 3 * sizeof(float));
+        //     // memcpy(ecs.meshes[0].vertices + pos + 3, mesh->normals + n_pos, 3 * sizeof(float));
+        //     // memcpy(ecs.meshes[0].vertices + pos + 6, mesh->texcoords + t_pos, 2 * sizeof(float));
+
+        //     // From cube shader
+        //     unsigned int pos = i * 7;
+        //     float red_rgba[] = { 1.0f, 0.0f, 0.0f, 1.0f };
+        //     float testval[] = { 0.8f };
+        //     memcpy(ecs.meshes[0].vertices + pos, mesh->positions + v_pos, 3 * sizeof(float)); // XYZ point
+        //     memcpy(ecs.meshes[0].vertices + pos + 3, red_rgba, 4 * sizeof(float)); // Color, just make it all red
+        //     // memcpy(ecs.meshes[0].vertices + pos, testval, 1 * sizeof(float)); // Color, just make it all red
+        //     // printf("= pos %d\n", pos);
+        // }
+
+        for (int j = 0; j < mesh->position_count * 3 + 3; j++) {
+            printf("%.2f\n", mesh->positions[j]);
+        }
+
+        for (i = 0; i < mesh->position_count; i++) {
+            printf("i is %d\n", i);
+            unsigned int pos = i * 7;
+            float red_rgba[] = { 1.0f, 0.0f, 0.0f, 1.0f };
+            // float v_pos[] = mesh->positions[pos];
+            ecs.meshes[0]._vertices[pos] = mesh->positions[i * 3];
+            ecs.meshes[0]._vertices[pos + 1] = mesh->positions[i * 3 + 1];
+            ecs.meshes[0]._vertices[pos + 2] = mesh->positions[i * 3 + 2];
+            // memcpy(ecs.meshes[0].vertices + pos, mesh->positions + pos, 3 * sizeof(float)); // XYZ point
+            memcpy(ecs.meshes[0]._vertices + pos + 3, red_rgba, 4 * sizeof(float)); // Color, just make it all red
+        }
+        
+        ecs.mesh_valid[0] = true;
+
+        for (int k = 0; k < i * 7; k++) {
+            if (k % 7 == 0) {
+                printf("\n");
+            }
+            if (ecs.meshes[0]._vertices[k] >= 0.0f)
+                printf(" "); 
+            printf("%.2f, ", ecs.meshes[0]._vertices[k]);
+        }
+
+        ecs.meshes[0].vbuf = sg_make_buffer(&(sg_buffer_desc){
+            .data = (sg_range){ &ecs.meshes[0]._vertices, i * 7 * sizeof(float) },
+            .label = "mesh-vertices"
+        });
+
+        ecs.meshes[0].ibuf = sg_make_buffer(&(sg_buffer_desc){
+            .type = SG_BUFFERTYPE_INDEXBUFFER,
+            .data = (sg_range){ &ecs.meshes[0]._indices, ecs.meshes[0]._indices_size * sizeof(uint16_t) },
+            .label = "mesh-indices"
+        });
+    }
+    
+    // From opengl tutorial
     // | pos     | | norm    | | tex |
     // [f] [f] [f] [f] [f] [f] [f] [f]
     // |-----16b-----| |-----16b-----|
     // Thus stride is 32b
+
+    // From basic cube shader below
+    // | pos     | | rgba        |
+    // [f] [f] [f] [f] [f] [f] [f]
+    // |-----16b-----| |---12b---|
+    // Thus stride is 28b
+    
+    // This is an obj loader which is compatable with the cube.glsl shader:
 
     // Clear screen values
     sg_pass_action pass_action = {
@@ -231,8 +301,8 @@ void init(void) {
     /* create shader */
     sg_shader shd = sg_make_shader(cube_shader_desc(sg_query_backend()));
 
-    /* create pipeline object */
-    state.pip = sg_make_pipeline(&(sg_pipeline_desc){
+    // /* create pipeline object */
+    state.pip = sg_make_pipeline(&(sg_pipeline_desc) {
         .layout = {
             /* test to provide buffer stride, but no attr offsets */
             .buffers[0].stride = 28,
@@ -251,38 +321,43 @@ void init(void) {
         .label = "cube-pipeline"
     });
 
-    sg_shader phong_shd = sg_make_shader(phong_shader_desc(sg_query_backend()));
-    state.mesh_pip = sg_make_pipeline(&(sg_pipeline_desc){
-        .shader = phong_shd,
-        /* if the vertex layout doesn't have gaps, don't need to provide strides and offsets */
-        .layout = {
-            .attrs = {
-                [ATTR_vs_a_pos].format = SG_VERTEXFORMAT_FLOAT3,
-                [ATTR_vs_a_tex_coords] = {
-                    .format = SG_VERTEXFORMAT_FLOAT2,
-                    .offset = 24
-                }
-            },
-            .buffers[0].stride = 32
-        },
-        .depth = {
-            .write_enabled = true,
-            .compare = SG_COMPAREFUNC_LESS_EQUAL,
-        },
-        .label = "object-pipeline"
-    });
+    // sg_shader phong_shd = sg_make_shader(phong_shader_desc(sg_query_backend()));
+    // state.mesh_pip = sg_make_pipeline(&(sg_pipeline_desc){
+    //     .shader = phong_shd,
+    //     /* if the vertex layout doesn't have gaps, don't need to provide strides and offsets */
+    //     .layout = {
+    //         .attrs = {
+    //             [ATTR_vs_a_pos].format = SG_VERTEXFORMAT_FLOAT3,
+    //             [ATTR_vs_a_tex_coords] = {
+    //                 .format = SG_VERTEXFORMAT_FLOAT2,
+    //                 .offset = 24
+    //             }
+    //         },
+    //         .buffers[0].stride = 32
+    //     },
+    //     .depth = {
+    //         .write_enabled = true,
+    //         .compare = SG_COMPAREFUNC_LESS_EQUAL,
+    //     },
+    //     .label = "object-pipeline"
+    // });
 
-    sg_buffer mesh_buffer = sg_make_buffer(&(sg_buffer_desc){
-        .size = face_count * 3 * 8 * sizeof(float),
-        .content = ecs.meshes[0],
-        .label = "mesh-vertices"
-    });
-    state.mesh_bind.vertex_buffers[0] = mesh_buffer;
+    // sg_buffer mesh_buffer = sg_make_buffer(&(sg_buffer_desc){
+    //     .size = face_count * 3 * 8 * sizeof(float),
+    //     .content = ecs.meshes[0],
+    //     .label = "mesh-vertices"
+    // });
+    // state.mesh_bind.vertex_buffers[0] = mesh_buffer;
 
     /* setup resource bindings */
     state.bind = (sg_bindings) {
         .vertex_buffers[0] = vbuf,
         .index_buffer = ibuf
+    };
+
+    ecs.meshes[0].binding = (sg_bindings) {
+        .vertex_buffers[0] = ecs.meshes[0].vbuf,
+        .index_buffer = ecs.meshes[0].ibuf,
     };
 }
 
@@ -298,29 +373,58 @@ void frame(void) {
     // UI Code
     // igPushFont(gui.main_font);
     igSetNextWindowPos((ImVec2){10,10}, ImGuiCond_Once, (ImVec2){0,0});
-    igSetNextWindowSize((ImVec2){400, 100}, ImGuiCond_Once);
-    igBegin("Hello Dear ImGui!", 0, ImGuiWindowFlags_None);
-    igColorEdit3("Background", &state.pass_action.colors[0].clear_value.r, ImGuiColorEditFlags_None);
-    igShowDemoWindow(true);
+    igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
+    igBegin("Tippelations!", 0, ImGuiWindowFlags_None);
+    igText("Wagon Engine");
+    igText("FPS %.1f\n", 1. / sapp_frame_duration());
+    igText("Camera x, y, z (%.2f, %.2f, %.2f)", state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z);
+    igText("Camera Rx, Ry (%.2f, %.2f)", state.cam_rx, state.cam_ry);
+    igText("Camera FOV %.1f", state.cam_fov);
+    igDragFloat("Camera X", &state.cam_pos.X, 0.1f, -35.0f, 35.0f, "%.1f", 0);
+    igDragFloat("Camera Y", &state.cam_pos.Y, 0.1f, -35.0f, 35.0f, "%.1f", 0);
+    igDragFloat("Camera Z", &state.cam_pos.Z, 0.1f, -35.0f, 35.0f, "%.1f", 0);
+    igSliderFloat("Camera Rx", &state.cam_rx, -90.0f, 90.0f, "%.1f", 0);
+    igSliderFloat("Camera Ry", &state.cam_ry, -180.0f, 180.0f, "%.1f", 0);
+    igSliderFloat("Camera FOV", &state.cam_fov, 40.0f, 90.0f, "%.1f", 0);
+    igCheckbox("Camera Rotation Drift", &state.cam_drift);
+
+    igCheckbox("Show DearImgui demo window", &gui.show_imgui_demo);
+    if (gui.show_imgui_demo) igShowDemoWindow(0);
     igEnd();
 
     const float w = sapp_widthf();
     const float h = sapp_heightf();
     const float t = (float)(sapp_frame_duration() * 60.0);
 
-    hmm_mat4 proj = HMM_Perspective(60.0f, w/h, 0.01f, 1000.0f);
-    hmm_mat4 view = HMM_LookAt(HMM_Vec3(0.0f, 1.5f, 20.0f), HMM_Vec3(0.0f, 0.0f, 0.0f), HMM_Vec3(0.0f, 1.0f, 0.0f));
-    hmm_mat4 view_proj = HMM_MultiplyMat4(proj, view);
+    if (state.cam_drift) {
+        state.cam_rx += 1.0f * t;
+        state.cam_ry += 0.5f * t;
+        if (state.cam_rx >= 90.0f) {
+            state.cam_rx = -90.0f;
+        }
+        if (state.cam_rx >= 180.0f) {
+            state.cam_rx = -180.0f;
+        }
+    }
+    hmm_mat4 rxm = HMM_Rotate(state.cam_rx, HMM_Vec3(1.0f, 0.0f, 0.0f));
+    hmm_mat4 rym = HMM_Rotate(state.cam_ry, HMM_Vec3(0.0f, 1.0f, 0.0f));
 
-    state.rx += 1.0f * t;
-    state.ry += 2.0f * t;
-    hmm_mat4 rxm = HMM_Rotate(state.rx, HMM_Vec3(1.0f, 0.0f, 0.0f));
-    hmm_mat4 rym = HMM_Rotate(state.ry, HMM_Vec3(0.0f, 1.0f, 0.0f));
+    hmm_mat4 proj = HMM_Perspective(state.cam_fov, w / h, 0.01f, 1000.0f);
+    proj = HMM_MultiplyMat4(proj, rxm);
+    proj = HMM_MultiplyMat4(proj, rym);
+    // hmm_mat4 view = HMM_LookAt(HMM_Vec3(0.0f, 1.5f, 20.0f), HMM_Vec3(0.0f, 0.0f, 0.0f), HMM_Vec3(0.0f, 1.0f, 0.0f));
+    // hmm_mat4 view = HMM_LookAt(state.cam_pos, HMM_Vec3(0.0f, 0.0f, 0.0f), HMM_Vec3(0.0f, 1.0f, 0.0f));
+    // view = HMM_AddMat4(HMM_Translate(state.cam_pos), view);
+
+    // Camera position is multiplied by -1 because this is camera position and we offset everything else by this position
+    hmm_mat4 view = HMM_Translate(HMM_MultiplyVec3f(state.cam_pos, -1.0f));
+    hmm_mat4 view_proj = HMM_MultiplyMat4(proj, view);
 
     sg_begin_default_pass(&state.pass_action, (int)w, (int)h);
     sg_apply_pipeline(state.pip);
     sg_apply_bindings(&state.bind);
 
+    // Calculate the model view projection matrix for each transform
     for (int i = 0; i < NUM_COMPONENTS; i++) {
         transform_c_t *transform = &ecs.transforms[i];
         if (ecs.transforms_valid[i]) {
@@ -339,11 +443,30 @@ void frame(void) {
             model = HMM_MultiplyMat4(model, roll);
 
             // model is now a 4x4 transformation matrix of the model's location
-
+            // Save this transform for rendering in the next for loop
+            transform->_transform = model;
+        }
+    }
+    
+    // Optional per-entity rendering of a cube mesh at the transform for debugging
+    for (int i = 0; i < NUM_COMPONENTS; i++) {
+        if (ecs.transforms_valid[i]) {
             vs_params_t vs_params;
-            vs_params.mvp = HMM_MultiplyMat4(view_proj, model);
+            vs_params.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[i]._transform);
             sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_params));
-            sg_draw(0, 36, 1);
+            // sg_draw(0, 36, 1);
+        }
+    }
+
+    // Render each mesh if it exists
+    for (int i = 0; i < NUM_COMPONENTS; i++) {
+        if (ecs.transforms_valid[i] && ecs.mesh_valid[i]) {
+            sg_apply_bindings(&ecs.meshes[i].binding);
+            transform_c_t *transform = &ecs.transforms[i];
+            vs_params_t vs_params;
+            vs_params.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[i]._transform);
+            sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_params));
+            sg_draw(0, ecs.meshes[i].face_count * 3, 1);
         }
     }
 
@@ -371,10 +494,10 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         .frame_cb = frame,
         .cleanup_cb = cleanup,
         .event_cb = event,
-        .width = 800,
-        .height = 600,
+        .width = 1080,
+        .height = 720,
         .sample_count = 4,
-        .window_title = "Cube (sokol-app)",
+        .window_title = "Wagon Engine",
         .icon.sokol_default = true,
         .logger.func = slog_func,
     };

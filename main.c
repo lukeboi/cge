@@ -19,6 +19,8 @@
 #include "sokol_glue.h"
 #include "sokol_imgui.h"
 
+#include "lib/stb/stb_image.h"
+
 #include "shader/cube.glsl.h"
 // #include "shader/phong.glsl.h"
 
@@ -387,9 +389,15 @@ void frame(void) {
     igSliderFloat("Camera Ry", &state.cam_ry, -180.0f, 180.0f, "%.1f", 0);
     igSliderFloat("Camera FOV", &state.cam_fov, 40.0f, 90.0f, "%.1f", 0);
     igCheckbox("Camera Rotation Drift", &state.cam_drift);
-
     igCheckbox("Show DearImgui demo window", &gui.show_imgui_demo);
     if (gui.show_imgui_demo) igShowDemoWindow(0);
+    igEnd();
+
+
+    igSetNextWindowPos((ImVec2){300,20}, ImGuiCond_Once, (ImVec2){0,0});
+    igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
+    igBegin("2d scroll slice view", 0, ImGuiWindowFlags_None);
+    igText("h");
     igEnd();
 
     const float w = sapp_widthf();

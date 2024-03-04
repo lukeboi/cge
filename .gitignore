@@ -1,2 +1,5 @@
 main
 main.o
+
+main.dSYM
+.DS_Store

@@ -397,6 +397,7 @@ void frame(void) {
     igSetNextWindowPos((ImVec2){300,20}, ImGuiCond_Once, (ImVec2){0,0});
     igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
     igBegin("2d scroll slice view", 0, ImGuiWindowFlags_None);
+    igSliderInt("Slice", &state.cam_rx, 0, 10, "%d", 0);
     igText("h");
     igEnd();
 

@@ -86,7 +86,7 @@ static struct {
     sg_bindings mesh_bind;
     sg_pass_action pass_action;
 } state = {
-    .cam_fov = 60.0f,
+    .cam_fov = 50.0f,
     .cam_drift = false
 };
 

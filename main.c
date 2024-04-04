@@ -387,7 +387,7 @@ void frame(void) {
     igDragFloat("Camera Z", &state.cam_pos.Z, 0.1f, -35.0f, 35.0f, "%.1f", 0);
     igSliderFloat("Camera Rx", &state.cam_rx, -90.0f, 90.0f, "%.1f", 0);
     igSliderFloat("Camera Ry", &state.cam_ry, -180.0f, 180.0f, "%.1f", 0);
-    igSliderFloat("Camera FOV", &state.cam_fov, 40.0f, 90.0f, "%.1f", 0);
+    igSliderFloat("Camera FOV", &state.cam_fov, 10.0f, 100.0f, "%.1f", 0);
     igCheckbox("Camera Rotation Drift", &state.cam_drift);
     igCheckbox("Show DearImgui demo window", &gui.show_imgui_demo);
     if (gui.show_imgui_demo) igShowDemoWindow(0);

@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdbool.h>
+#include <string.h>
 
 #define HANDMADE_MATH_IMPLEMENTATION
 #define HANDMADE_MATH_NO_SSE
@@ -22,6 +23,7 @@
 #include "lib/stb/stb_image.h"
 
 #include "shader/cube.glsl.h"
+// #include "shader/volume.glsl.h"
 // #include "shader/phong.glsl.h"
 
 // ECS
@@ -47,6 +49,11 @@ typedef struct {
     sg_bindings binding;
 } mesh_c_t;
 
+typedef struct {
+    uint8_t _volume[100 * 100 * 100]; // All volumes come in increments of 500x500x500 // TODO malloc
+    hmm_vec3 position; // Position of the volume
+} volume_c_t;
+
 // ECS Global struct
 static struct {
     // Transforms of each object
@@ -57,9 +64,15 @@ static struct {
     // TODO this should be malloced
     bool mesh_valid[NUM_COMPONENTS];
     mesh_c_t meshes[NUM_COMPONENTS];
+
+    // 3D volume buffer
+    // TODO this should be malloced
+    bool volume_valid[NUM_COMPONENTS];
+    volume_c_t volumes[NUM_COMPONENTS];
 } ecs = {
     .transforms_valid   = { [0 ... NUM_COMPONENTS-1] = false },
-    .mesh_valid         = { [0 ... NUM_COMPONENTS-1] = false }
+    .mesh_valid         = { [0 ... NUM_COMPONENTS-1] = false },
+    .volume_valid       = { [0 ... NUM_COMPONENTS-1] = false }
 };
 
 // Component-specific functions
@@ -85,6 +98,7 @@ static struct {
     sg_pipeline mesh_pip;
     sg_bindings mesh_bind;
     sg_pass_action pass_action;
+    bool key_down[256]; // keeps track of keypresses
 } state = {
     .cam_fov = 60.0f,
     .cam_drift = false
@@ -94,6 +108,8 @@ fastObjMesh* mesh;
 
 // Sokol init
 void init(void) {
+    memset(state.key_down, 0, sizeof(state.key_down)); // set key down to zero
+
     for (int i = 0; i < 5; i++) {
         update_transform((float)i, &(transform_c_t){
             .position = HMM_Vec3((float)i * 3.1f - 6.0f, (float)i * 1.1f - 5.0f, -10.0f),
@@ -323,6 +339,12 @@ void init(void) {
         .label = "cube-pipeline"
     });
 
+    // set first volume to random
+    ecs.volume_valid[0] = true;
+    for (int i = 0; i < 100 * 100 * 100; i++) {
+        ecs.volumes[0]._volume[i] = 128;
+    }
+
     // sg_shader phong_shd = sg_make_shader(phong_shader_desc(sg_query_backend()));
     // state.mesh_pip = sg_make_pipeline(&(sg_pipeline_desc){
     //     .shader = phong_shd,
@@ -361,6 +383,62 @@ void init(void) {
         .vertex_buffers[0] = ecs.meshes[0].vbuf,
         .index_buffer = ecs.meshes[0].ibuf,
     };
+}
+
+void camera_move(float dt) {
+    // if W key is down, move camera position forward
+    const float camera_speed = 0.1f * dt;
+    
+    // Calculate forward direction based on camera's yaw and pitch
+    hmm_vec3 forward = HMM_Vec3(
+        cosf(HMM_ToRadians(state.cam_rx)) * sinf(HMM_ToRadians(state.cam_ry)),
+        -sinf(HMM_ToRadians(state.cam_rx)),
+        -cosf(HMM_ToRadians(state.cam_rx)) * cosf(HMM_ToRadians(state.cam_ry))
+    );
+
+    // Calculate right direction based on camera's yaw
+    hmm_vec3 right = HMM_Vec3(
+        cosf(HMM_ToRadians(state.cam_ry)),
+        0.0f,
+        sinf(HMM_ToRadians(state.cam_ry))
+    );
+
+    printf("forward %.2f, %.2f, %.2f | right %.2f, %.2f, %.2f\n", forward.X, forward.Y, forward.Z, right.X, right.Y, right.Z);
+
+    // Move forward
+    if (state.key_down[SAPP_KEYCODE_W]) {
+        state.cam_pos = HMM_AddVec3(state.cam_pos, HMM_MultiplyVec3f(forward, camera_speed));
+    }
+    // Move backward
+    if (state.key_down[SAPP_KEYCODE_S]) {
+        state.cam_pos = HMM_SubtractVec3(state.cam_pos, HMM_MultiplyVec3f(forward, camera_speed));
+    }
+    // Move left
+    if (state.key_down[SAPP_KEYCODE_A]) {
+        state.cam_pos = HMM_SubtractVec3(state.cam_pos, HMM_MultiplyVec3f(right, camera_speed));
+    }
+    // Move right
+    if (state.key_down[SAPP_KEYCODE_D]) {
+        state.cam_pos = HMM_AddVec3(state.cam_pos, HMM_MultiplyVec3f(right, camera_speed));
+    }
+
+    // const float camera_speed = 0.1f; // Adjust speed as needed
+    // if (state.key_down[SAPP_KEYCODE_W]) {
+    //     hmm_vec3 forward = HMM_Vec3(0.0f, 0.0f, -1.0f); // Forward direction (negative Z)
+    //     state.cam_pos = HMM_AddVec3(state.cam_pos, HMM_MultiplyVec3f(forward, camera_speed));
+    // }
+    // if (state.key_down[SAPP_KEYCODE_S]) {
+    //     hmm_vec3 backward = HMM_Vec3(0.0f, 0.0f, 1.0f); // Backward direction (positive Z)
+    //     state.cam_pos = HMM_AddVec3(state.cam_pos, HMM_MultiplyVec3f(backward, camera_speed));
+    // }
+    // if (state.key_down[SAPP_KEYCODE_A]) {
+    //     hmm_vec3 left = HMM_Vec3(-1.0f, 0.0f, 0.0f); // Left direction (negative X)
+    //     state.cam_pos = HMM_AddVec3(state.cam_pos, HMM_MultiplyVec3f(left, camera_speed));
+    // }
+    // if (state.key_down[SAPP_KEYCODE_D]) {
+    //     hmm_vec3 right = HMM_Vec3(1.0f, 0.0f, 0.0f); // Right direction (positive X)
+    //     state.cam_pos = HMM_AddVec3(state.cam_pos, HMM_MultiplyVec3f(right, camera_speed));
+    // }
 }
 
 void frame(void) {
@@ -404,6 +482,9 @@ void frame(void) {
     const float w = sapp_widthf();
     const float h = sapp_heightf();
     const float t = (float)(sapp_frame_duration() * 60.0);
+
+    // Camera movement
+    camera_move(t);
 
     if (state.cam_drift) {
         state.cam_rx += 1.0f * t;
@@ -463,7 +544,7 @@ void frame(void) {
             vs_params_t vs_params;
             vs_params.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[i]._transform);
             sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_params));
-            // sg_draw(0, 36, 1);
+            sg_draw(0, 36, 1);
         }
     }
 
@@ -491,8 +572,44 @@ void cleanup(void) {
     sg_shutdown();
 }
 
+// Handle camera orbit
+void camera_event(const sapp_event* ev) {
+    // https://github.com/floooh/sokol-samples/blob/7b85538bb974eecb12027db9b5e66f274797461a/libs/util/camera.h#L112
+    switch (ev->type) {
+        case SAPP_EVENTTYPE_MOUSE_DOWN:
+            if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+                sapp_lock_mouse(true);
+            }
+            break;
+        case SAPP_EVENTTYPE_MOUSE_UP:
+            if (ev->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
+                sapp_lock_mouse(false);
+            }
+            break;
+        // case SAPP_EVENTTYPE_MOUSE_SCROLL: // TODO support scrolling
+        //     cam_zoom(cam, ev->scroll_y * 0.5f);
+        //     break;
+        case SAPP_EVENTTYPE_MOUSE_MOVE:
+            if (sapp_mouse_locked()) {
+                state.cam_ry += ev->mouse_dx * 0.1f; // left right motion
+                state.cam_rx += ev->mouse_dy * 0.1f; // up down motion
+                if (state.cam_rx > 90.0f) state.cam_rx = 90.0f;
+                if (state.cam_rx < -90.0f) state.cam_rx = -90.0f;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 static void event(const sapp_event* ev) {
-    simgui_handle_event(ev);
+    if(!simgui_handle_event(ev)) {
+        camera_event(ev);
+    }
+    
+    // Log keypresses
+    if (ev->type == SAPP_EVENTTYPE_KEY_DOWN) state.key_down[ev->key_code] = true;
+    if (ev->type == SAPP_EVENTTYPE_KEY_UP) state.key_down[ev->key_code] = false;
 }
 
 sapp_desc sokol_main(int argc, char* argv[]) {

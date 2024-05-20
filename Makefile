@@ -3,7 +3,7 @@ CC := cc
 CXX := g++ # g++ is used to compile Imgui, which is a c++ library
 
 # Include directories
-INCLUDES := -Ilib/hmm -Ilib/sokol -Ilib/cimgui/imgui -Ilib/cimgui -Ilib/fast_obj
+INCLUDES := -Ilib/hmm -Ilib/sokol -Ilib/sokol/util -Ilib/cimgui/imgui -Ilib/cimgui -Ilib/fast_obj
 
 # Compiler flags
 CFLAGS := -g $(INCLUDES)

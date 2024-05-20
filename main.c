@@ -23,7 +23,7 @@
 #include "lib/stb/stb_image.h"
 
 #include "shader/cube.glsl.h"
-// #include "shader/volume.glsl.h"
+#include "shader/volume.glsl.h"
 // #include "shader/phong.glsl.h"
 
 // ECS
@@ -97,6 +97,9 @@ static struct {
     sg_bindings bind;
     sg_pipeline mesh_pip;
     sg_bindings mesh_bind;
+    sg_pipeline volume_pip;
+    sg_bindings volume_bind;
+    sg_image volume_img;
     sg_pass_action pass_action;
     bool key_down[256]; // keeps track of keypresses
 } state = {
@@ -128,9 +131,13 @@ void init(void) {
     // Camera set inital position
     state.cam_pos = HMM_Vec3(0.0f, 1.5f, 20.0f);
 
+    // sg_setup(&(sg_desc){
+    //     .context = sapp_sgcontext(),
+    //     .logger.func = slog_func,
+    // });
     sg_setup(&(sg_desc){
-        .context = sapp_sgcontext(),
-        .logger.func = slog_func,
+        .environment = sglue_environment(),
+        .logger.func = slog_func
     });
 
     // simgui_setup(&(simgui_desc_t){ 0 });
@@ -318,6 +325,7 @@ void init(void) {
 
     /* create shader */
     sg_shader shd = sg_make_shader(cube_shader_desc(sg_query_backend()));
+    sg_shader volume_shader = sg_make_shader(volume_shader_desc(sg_query_backend()));
 
     // /* create pipeline object */
     state.pip = sg_make_pipeline(&(sg_pipeline_desc) {
@@ -339,11 +347,65 @@ void init(void) {
         .label = "cube-pipeline"
     });
 
+    state.volume_pip = sg_make_pipeline(&(sg_pipeline_desc){
+        .layout = {
+            .attrs = {
+                [ATTR_vs_volume_position].format = SG_VERTEXFORMAT_FLOAT3,
+                [ATTR_vs_volume_texCoords].format = SG_VERTEXFORMAT_FLOAT3
+            }
+        },
+        .shader = volume_shader,
+        .index_type = SG_INDEXTYPE_NONE,
+        .cull_mode = SG_CULLMODE_BACK,
+        .depth = {
+            .write_enabled = true,
+            .compare = SG_COMPAREFUNC_LESS_EQUAL,
+        },
+        .label = "volume-pipeline"
+    });
+
     // set first volume to random
     ecs.volume_valid[0] = true;
     for (int i = 0; i < 100 * 100 * 100; i++) {
-        ecs.volumes[0]._volume[i] = 128;
+        ecs.volumes[0]._volume[i] = 255;
     }
+
+    state.volume_img = sg_make_image(&(sg_image_desc){
+        .type = SG_IMAGETYPE_3D,
+        .width = 100, // Your volume dimensions
+        .height = 100,
+        .num_slices = 100,
+        .pixel_format = SG_PIXELFORMAT_R8, // Assuming 8-bit grayscale volume
+        .data.subimage[0][0] = {
+            .ptr = ecs.volumes[0]._volume,
+            .size = sizeof(ecs.volumes[0]._volume)
+        },
+        .label = "volume-texture"
+    });
+
+    float volume_vertices[] = {
+        // Positions        // TexCoords
+        -1.0f, -1.0f, 0.0f,  0.0f, 0.0f, 0.0f,
+        1.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+        1.0f,  1.0f, 0.0f,  1.0f, 1.0f, 0.0f,
+        -1.0f,  1.0f, 0.0f,  0.0f, 1.0f, 0.0f
+    };
+
+    sg_buffer volume_vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .data = SG_RANGE(volume_vertices),
+        .label = "volume-vertices"
+    });
+    
+    state.volume_bind = (sg_bindings){
+        .vertex_buffers[0] = volume_vbuf, // Assuming you have vertices for the volume
+        // .index_buffer = ibuf, // Assuming you have indices for the volume
+        // .fs_images[SLOT_tex] = state.volume_img
+    };
+    state.volume_bind.fs.images[SLOT_tex] = state.volume_img;
+    state.volume_bind.fs.samplers[SLOT_smp] = sg_make_sampler(&(sg_sampler_desc){
+        .min_filter = SG_FILTER_LINEAR,
+        .mag_filter = SG_FILTER_LINEAR,
+    });
 
     // sg_shader phong_shd = sg_make_shader(phong_shader_desc(sg_query_backend()));
     // state.mesh_pip = sg_make_pipeline(&(sg_pipeline_desc){
@@ -510,7 +572,8 @@ void frame(void) {
     hmm_mat4 view = HMM_Translate(HMM_MultiplyVec3f(state.cam_pos, -1.0f));
     hmm_mat4 view_proj = HMM_MultiplyMat4(proj, view);
 
-    sg_begin_default_pass(&state.pass_action, (int)w, (int)h);
+    // sg_begin_default_pass(&state.pass_action, (int)w, (int)h);
+    sg_begin_pass(&(sg_pass){ .action = state.pass_action, .swapchain = sglue_swapchain() });
     sg_apply_pipeline(state.pip);
     sg_apply_bindings(&state.bind);
 
@@ -559,6 +622,24 @@ void frame(void) {
             sg_draw(0, ecs.meshes[i].face_count * 3, 1);
         }
     }
+
+    // Apply volume pipeline and draw
+    if (ecs.volume_valid[0]) {
+        sg_apply_pipeline(state.volume_pip);
+        sg_apply_bindings(&state.volume_bind);
+        fs_vol_params_t fs_vol_params;
+        fs_vol_params.camera_pos[0] = state.cam_pos.X;
+        fs_vol_params.camera_pos[1] = state.cam_pos.Y;
+        fs_vol_params.camera_pos[2] = state.cam_pos.Z;
+        sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_vol_params, &SG_RANGE(fs_vol_params));
+        printf("fff\n");
+        sg_draw(0, 4, 1); // Assuming you have 4 vertices for a quad
+    }
+
+    // Apply volume pipeline and draw
+    // sg_apply_pipeline(state.volume_pip);
+    // sg_apply_bindings(&state.volume_bind);
+    // sg_draw(0, 0, 1);
 
     simgui_render();
     sg_end_pass();

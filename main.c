@@ -109,6 +109,26 @@ static struct {
 
 fastObjMesh* mesh;
 
+// Temp code to generate a colormap
+#define COLORMAP_WIDTH 256
+#define COLORMAP_HEIGHT 1
+
+uint8_t colormap_data[COLORMAP_WIDTH * 4]; // 4 channels (RGBA) per pixel
+sg_image colormap_img;
+
+void create_colormap(void) {
+    for (int i = 0; i < COLORMAP_WIDTH; ++i) {
+        float t = (float)i / (COLORMAP_WIDTH - 1);
+        colormap_data[i * 4 + 0] = (uint8_t)((1.0f - t) * 255); // Blue channel
+        colormap_data[i * 4 + 1] = 0;                           // Green channel
+        colormap_data[i * 4 + 2] = (uint8_t)(t * 255);          // Red channel
+        colormap_data[i * 4 + 3] = 255;                         // Alpha channel
+        printf("%d\n", (uint8_t)((1.0f - t) * 255));
+    }
+}
+// End temp code
+
+
 // Sokol init
 void init(void) {
     memset(state.key_down, 0, sizeof(state.key_down)); // set key down to zero
@@ -350,8 +370,7 @@ void init(void) {
     state.volume_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .layout = {
             .attrs = {
-                [ATTR_vs_volume_position].format = SG_VERTEXFORMAT_FLOAT3,
-                [ATTR_vs_volume_texCoords].format = SG_VERTEXFORMAT_FLOAT3
+                [ATTR_vs_volume_position] = { .format = SG_VERTEXFORMAT_FLOAT2 }, // position
             }
         },
         .shader = volume_shader,
@@ -364,11 +383,13 @@ void init(void) {
         .label = "volume-pipeline"
     });
 
+
     // set first volume to random
     ecs.volume_valid[0] = true;
     for (int i = 0; i < 100 * 100 * 100; i++) {
         ecs.volumes[0]._volume[i] = 255;
     }
+
 
     state.volume_img = sg_make_image(&(sg_image_desc){
         .type = SG_IMAGETYPE_3D,
@@ -383,12 +404,34 @@ void init(void) {
         .label = "volume-texture"
     });
 
+    // Create the colormap
+    create_colormap();
+
+    // Create the Sokol image for the colormap
+    colormap_img = sg_make_image(&(sg_image_desc){
+        .width = COLORMAP_WIDTH,
+        .height = COLORMAP_HEIGHT,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .data.subimage[0][0] = {
+            .ptr = colormap_data,
+            .size = sizeof(colormap_data)
+        },
+        .label = "colormap"
+    });
+
+
+    // Volume vertices
+    // float volume_vertices[] = {
+    //     -1.0f, -1.0f, 0.0f,  0.0f, 0.0f, 0.0f,
+    //      1.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+    //      1.0f,  1.0f, 0.0f,  1.0f, 1.0f, 0.0f,
+    //     -1.0f,  1.0f, 0.0f,  0.0f, 1.0f, 0.0f
+    // };
     float volume_vertices[] = {
-        // Positions        // TexCoords
-        -1.0f, -1.0f, 0.0f,  0.0f, 0.0f, 0.0f,
-        1.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
-        1.0f,  1.0f, 0.0f,  1.0f, 1.0f, 0.0f,
-        -1.0f,  1.0f, 0.0f,  0.0f, 1.0f, 0.0f
+        // Positions
+        -0.5f, -0.5f,
+        0.5f, -0.5f,
+        0.0f,  0.5f,
     };
 
     sg_buffer volume_vbuf = sg_make_buffer(&(sg_buffer_desc){
@@ -401,8 +444,14 @@ void init(void) {
         // .index_buffer = ibuf, // Assuming you have indices for the volume
         // .fs_images[SLOT_tex] = state.volume_img
     };
-    state.volume_bind.fs.images[SLOT_tex] = state.volume_img;
-    state.volume_bind.fs.samplers[SLOT_smp] = sg_make_sampler(&(sg_sampler_desc){
+    state.volume_bind.fs.images[SLOT_volume] = state.volume_img;
+    state.volume_bind.fs.samplers[SLOT_volume_smp] = sg_make_sampler(&(sg_sampler_desc){
+        .min_filter = SG_FILTER_LINEAR,
+        .mag_filter = SG_FILTER_LINEAR,
+    });
+    // Add the colormap image to the bindings
+    state.volume_bind.fs.images[SLOT_colormap] = colormap_img;
+    state.volume_bind.fs.samplers[SLOT_colormap_smp] = sg_make_sampler(&(sg_sampler_desc){
         .min_filter = SG_FILTER_LINEAR,
         .mag_filter = SG_FILTER_LINEAR,
     });
@@ -465,7 +514,7 @@ void camera_move(float dt) {
         sinf(HMM_ToRadians(state.cam_ry))
     );
 
-    printf("forward %.2f, %.2f, %.2f | right %.2f, %.2f, %.2f\n", forward.X, forward.Y, forward.Z, right.X, right.Y, right.Z);
+    // printf("forward %.2f, %.2f, %.2f | right %.2f, %.2f, %.2f\n", forward.X, forward.Y, forward.Z, right.X, right.Y, right.Z);
 
     // Move forward
     if (state.key_down[SAPP_KEYCODE_W]) {
@@ -623,18 +672,34 @@ void frame(void) {
         }
     }
 
-    // Apply volume pipeline and draw
+
     if (ecs.volume_valid[0]) {
         sg_apply_pipeline(state.volume_pip);
         sg_apply_bindings(&state.volume_bind);
-        fs_vol_params_t fs_vol_params;
-        fs_vol_params.camera_pos[0] = state.cam_pos.X;
-        fs_vol_params.camera_pos[1] = state.cam_pos.Y;
-        fs_vol_params.camera_pos[2] = state.cam_pos.Z;
+
+        fs_vol_params_t fs_vol_params = {
+            // .camera_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
+            .volume_dims = { 100, 100, 100 },
+            .dt_scale = 0.01f,
+            .near_clip = 0.01f,
+            .far_clip = 1000.0f,
+            .new_box_min = { 0.0f, 0.0f, 0.0f },
+            .new_box_max = { 1.0f, 1.0f, 1.0f }
+        };
         sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_vol_params, &SG_RANGE(fs_vol_params));
-        printf("fff\n");
-        sg_draw(0, 4, 1); // Assuming you have 4 vertices for a quad
+        printf("Passed first apply uniforms\n");
+
+        vs_vol_params_t vs_vol_params = {
+            //.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[0]._transform),
+            .proj_view = view_proj,
+            .eye_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
+            .volume_scale = { 1.0f, 1.0f, 1.0f }
+        };
+        sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_vol_params));
+
+        sg_draw(0, 4, 1); // Assuming 4 vertices for the volume quad
     }
+
 
     // Apply volume pipeline and draw
     // sg_apply_pipeline(state.volume_pip);

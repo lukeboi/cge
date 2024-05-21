@@ -122,8 +122,8 @@ void create_colormap(void) {
         colormap_data[i * 4 + 0] = (uint8_t)((1.0f - t) * 255); // Blue channel
         colormap_data[i * 4 + 1] = 0;                           // Green channel
         colormap_data[i * 4 + 2] = (uint8_t)(t * 255);          // Red channel
-        colormap_data[i * 4 + 3] = 255;                         // Alpha channel
-        printf("%d\n", (uint8_t)((1.0f - t) * 255));
+        colormap_data[i * 4 + 3] = (uint8_t)((1.0f - t) * 255);                         // Alpha channel
+        printf("COLORMAP %d %d %d %d\n", colormap_data[i * 4 + 0], colormap_data[i * 4 + 1], colormap_data[i * 4 + 2], colormap_data[i * 4 + 3]);
     }
 }
 // End temp code
@@ -369,12 +369,13 @@ void init(void) {
 
     state.volume_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .layout = {
+            .buffers[0].stride = 12,
             .attrs = {
-                [ATTR_vs_volume_position] = { .format = SG_VERTEXFORMAT_FLOAT2 }, // position
+                [ATTR_vs_volume_pos] = { .format = SG_VERTEXFORMAT_FLOAT3 }, // position
             }
         },
         .shader = volume_shader,
-        .index_type = SG_INDEXTYPE_NONE,
+        .index_type = SG_INDEXTYPE_UINT16,
         .cull_mode = SG_CULLMODE_BACK,
         .depth = {
             .write_enabled = true,
@@ -387,7 +388,8 @@ void init(void) {
     // set first volume to random
     ecs.volume_valid[0] = true;
     for (int i = 0; i < 100 * 100 * 100; i++) {
-        ecs.volumes[0]._volume[i] = 255;
+        ecs.volumes[0]._volume[i] = rand() % 256;
+        // printf("%d\n", ecs.volumes[0]._volume[i]);
     }
 
 
@@ -429,9 +431,35 @@ void init(void) {
     // };
     float volume_vertices[] = {
         // Positions
-        -0.5f, -0.5f,
-        0.5f, -0.5f,
-        0.0f,  0.5f,
+        -1.0, -1.0, -1.0,
+         1.0, -1.0, -1.0,
+         1.0,  1.0, -1.0,
+        -1.0,  1.0, -1.0,
+
+        -1.0, -1.0,  1.0,
+         1.0, -1.0,  1.0,
+         1.0,  1.0,  1.0,
+        -1.0,  1.0,  1.0,
+
+        -1.0, -1.0, -1.0,
+        -1.0,  1.0, -1.0,
+        -1.0,  1.0,  1.0,
+        -1.0, -1.0,  1.0,
+
+        1.0, -1.0, -1.0,
+        1.0,  1.0, -1.0,
+        1.0,  1.0,  1.0,
+        1.0, -1.0,  1.0,
+
+        -1.0, -1.0, -1.0,
+        -1.0, -1.0,  1.0,
+         1.0, -1.0,  1.0,
+         1.0, -1.0, -1.0,
+
+        -1.0,  1.0, -1.0,
+        -1.0,  1.0,  1.0,
+         1.0,  1.0,  1.0,
+         1.0,  1.0, -1.0,
     };
 
     sg_buffer volume_vbuf = sg_make_buffer(&(sg_buffer_desc){
@@ -441,7 +469,7 @@ void init(void) {
     
     state.volume_bind = (sg_bindings){
         .vertex_buffers[0] = volume_vbuf, // Assuming you have vertices for the volume
-        // .index_buffer = ibuf, // Assuming you have indices for the volume
+        .index_buffer = ibuf, // Assuming you have indices for the volume
         // .fs_images[SLOT_tex] = state.volume_img
     };
     state.volume_bind.fs.images[SLOT_volume] = state.volume_img;
@@ -687,7 +715,6 @@ void frame(void) {
             .new_box_max = { 1.0f, 1.0f, 1.0f }
         };
         sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_vol_params, &SG_RANGE(fs_vol_params));
-        printf("Passed first apply uniforms\n");
 
         vs_vol_params_t vs_vol_params = {
             //.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[0]._transform),
@@ -697,7 +724,7 @@ void frame(void) {
         };
         sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_vol_params));
 
-        sg_draw(0, 4, 1); // Assuming 4 vertices for the volume quad
+        sg_draw(0, 36, 1); // Assuming 4 vertices for the volume quad
     }
 
 

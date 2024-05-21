@@ -1,7 +1,7 @@
 @ctype mat4 hmm_mat4
 
 @vs vs_volume
-layout(location = 0) in vec2 position;
+layout(location=0) in vec3 pos;
 
 uniform vs_vol_params {
     mat4 proj_view;
@@ -12,19 +12,14 @@ uniform vs_vol_params {
 out vec3 vray_dir;
 flat out vec3 transformed_eye;
 
-void main() {
-    // TODO: For non-uniform size volumes we need to transform them differently as well
-    // to center them properly
-    //vec3 volume_translation = vec3(0.5) - volume_scale * 0.5;
-    //gl_Position = proj_view * vec4(position * volume_scale + volume_translation, 1);
-    //transformed_eye = (eye_pos - volume_translation) / volume_scale;
-    //vray_dir = position - transformed_eye;
+void main(void) {
+	// Translate the cube to center it at the origin.
+	vec3 volume_translation = vec3(0.5) - volume_scale * 0.5;
+	gl_Position = proj_view * vec4(pos * volume_scale + volume_translation, 1);
 
-    //vec2 pos = position * 2.0 - 1.0; // Transform from [0,1] to [-1,1]
-    gl_Position = vec4(position, 0.0, 0.0);
-    transformed_eye = eye_pos;
-    vray_dir = normalize(vec3(position, 1.0));
-    //vray_dir = normalize(pos, 1.0)
+	// Compute eye position and ray directions in the unit cube space
+	transformed_eye = (eye_pos - volume_translation) / volume_scale;
+	vray_dir = pos - transformed_eye;
 }
 @end
 
@@ -81,11 +76,11 @@ float linear_to_srgb(float x) {
 }
 
 void main(void) {
-    FragColor = vec4(1.0f, 0.5f, 0.5f, 0.5f);
+    //FragColor = vec4(1.0f, 0.5f, 0.5f, 0.5f);
     vec3 ray_dir = normalize(vray_dir);
     vec2 t_hit = intersect_box(transformed_eye, ray_dir);
     if (t_hit.x > t_hit.y) {
-        //discard;
+        discard;
     }
     t_hit.x = max(t_hit.x, near_clip); // near clip
     t_hit.y = min(t_hit.y, far_clip); // far clip
@@ -102,11 +97,11 @@ void main(void) {
         FragColor.rgb += (1.0 - FragColor.a) * val_color.a * val_color.rgb;
         FragColor.a += (1.0 - FragColor.a) * val_color.a;
         if (FragColor.a >= 0.99) {
-            //break;
+            break;
         }
         p += ray_dir * dt;
     }
-    FragColor = vec4(1.0f, 1.0f, 0.5f, 0.5f);
+    //FragColor = vec4(0.0f, 1.0f, 0.0f, 1.0f);
     //FragColor.r = linear_to_srgb(FragColor.r);
     //FragColor.g = linear_to_srgb(FragColor.g);
     //FragColor.b = linear_to_srgb(FragColor.b);

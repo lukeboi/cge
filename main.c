@@ -510,14 +510,14 @@ void init(void) {
     };
     state.volume_bind.fs.images[SLOT_volume] = state.volume_img;
     state.volume_bind.fs.samplers[SLOT_volume_smp] = sg_make_sampler(&(sg_sampler_desc){
-        .min_filter = SG_FILTER_LINEAR,
-        .mag_filter = SG_FILTER_LINEAR,
+        .min_filter = SG_FILTER_NEAREST,
+        .mag_filter = SG_FILTER_NEAREST,
     });
     // Add the colormap image to the bindings
     state.volume_bind.fs.images[SLOT_colormap] = colormap_img;
     state.volume_bind.fs.samplers[SLOT_colormap_smp] = sg_make_sampler(&(sg_sampler_desc){
-        .min_filter = SG_FILTER_LINEAR,
-        .mag_filter = SG_FILTER_LINEAR,
+        .min_filter = SG_FILTER_NEAREST,
+        .mag_filter = SG_FILTER_NEAREST,
     });
 
     // sg_shader phong_shd = sg_make_shader(phong_shader_desc(sg_query_backend()));

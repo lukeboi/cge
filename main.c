@@ -347,6 +347,16 @@ void init(void) {
     sg_shader shd = sg_make_shader(cube_shader_desc(sg_query_backend()));
     sg_shader volume_shader = sg_make_shader(volume_shader_desc(sg_query_backend()));
 
+    sg_blend_state blend_state = {
+        .enabled = true,
+        .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
+        .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+        .op_rgb = SG_BLENDOP_ADD,
+        .src_factor_alpha = SG_BLENDFACTOR_ONE,
+        .dst_factor_alpha = SG_BLENDFACTOR_ZERO,
+        .op_alpha = SG_BLENDOP_ADD
+    };
+
     // /* create pipeline object */
     state.pip = sg_make_pipeline(&(sg_pipeline_desc) {
         .layout = {
@@ -364,6 +374,7 @@ void init(void) {
             .write_enabled = true,
             .compare = SG_COMPAREFUNC_LESS_EQUAL,
         },
+        .colors[0].blend = blend_state, // Add blend state here
         .label = "cube-pipeline"
     });
 
@@ -381,18 +392,27 @@ void init(void) {
             .write_enabled = true,
             .compare = SG_COMPAREFUNC_LESS_EQUAL,
         },
-        .label = "volume-pipeline"
+        .colors[0].blend = blend_state, // Add blend state here
+        .label = "volume-pipeline",
     });
 
 
     // set first volume to random
     ecs.volume_valid[0] = true;
-    for (int i = 0; i < 100 * 100 * 100; i++) {
-        ecs.volumes[0]._volume[i] = rand() % 256;
-        // printf("%d\n", ecs.volumes[0]._volume[i]);
+    // for (int i = 0; i < 100 * 100 * 100; i++) {
+    //     ecs.volumes[0]._volume[i] = i % 256;
+    //     // printf("%d\n", ecs.volumes[0]._volume[i]);
+    // }
+
+
+    for (int z = 0; z < 100; z++) {
+        for (int y = 0; y < 100; y++) {
+            for (int x = 0; x < 100; x++) {
+                // Calculate the linear gradient value along the X axis
+                ecs.volumes[0]._volume[x + y * 100 + z * 100 * 100] = (uint8_t)((float)x / (100 - 1) * 255);
+            }
+        }
     }
-
-
     state.volume_img = sg_make_image(&(sg_image_desc){
         .type = SG_IMAGETYPE_3D,
         .width = 100, // Your volume dimensions
@@ -462,6 +482,22 @@ void init(void) {
          1.0,  1.0, -1.0,
     };
 
+    /* create an index buffer for the cube */
+    uint16_t volume_indices[] = {
+        0, 2, 1,  0, 3, 2,
+        6, 4, 5,  7, 4, 6,
+        8, 10, 9,  8, 11, 10,
+        14, 12, 13,  15, 12, 14,
+        16, 18, 17,  16, 19, 18,
+        22, 20, 21,  23, 20, 22
+    };
+
+    sg_buffer volume_ibuf = sg_make_buffer(&(sg_buffer_desc){
+        .type = SG_BUFFERTYPE_INDEXBUFFER,
+        .data = SG_RANGE(volume_indices),
+        .label = "cube-indices"
+    });
+
     sg_buffer volume_vbuf = sg_make_buffer(&(sg_buffer_desc){
         .data = SG_RANGE(volume_vertices),
         .label = "volume-vertices"
@@ -469,7 +505,7 @@ void init(void) {
     
     state.volume_bind = (sg_bindings){
         .vertex_buffers[0] = volume_vbuf, // Assuming you have vertices for the volume
-        .index_buffer = ibuf, // Assuming you have indices for the volume
+        .index_buffer = volume_ibuf, // Assuming you have indices for the volume
         // .fs_images[SLOT_tex] = state.volume_img
     };
     state.volume_bind.fs.images[SLOT_volume] = state.volume_img;
@@ -708,7 +744,7 @@ void frame(void) {
         fs_vol_params_t fs_vol_params = {
             // .camera_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
             .volume_dims = { 100, 100, 100 },
-            .dt_scale = 0.01f,
+            .dt_scale = 0.005f,
             .near_clip = 0.01f,
             .far_clip = 1000.0f,
             .new_box_min = { 0.0f, 0.0f, 0.0f },

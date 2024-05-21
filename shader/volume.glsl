@@ -76,35 +76,49 @@ float linear_to_srgb(float x) {
 }
 
 void main(void) {
-    //FragColor = vec4(1.0f, 0.5f, 0.5f, 0.5f);
-    vec3 ray_dir = normalize(vray_dir);
-    vec2 t_hit = intersect_box(transformed_eye, ray_dir);
-    if (t_hit.x > t_hit.y) {
-        discard;
-    }
-    t_hit.x = max(t_hit.x, near_clip); // near clip
-    t_hit.y = min(t_hit.y, far_clip); // far clip
-    vec3 dt_vec = 1.0 / (vec3(volume_dims) * abs(ray_dir));
-    float dt = dt_scale * min(dt_vec.x, min(dt_vec.y, dt_vec.z));
-    float offset = wang_hash(int(gl_FragCoord.x + 1280.0 * gl_FragCoord.y));
-    vec3 p = transformed_eye + (t_hit.x + offset * dt) * ray_dir;
-    for (float t = t_hit.x; t < t_hit.y; t += dt) {
-        ivec3 p_ivec = ivec3(floor(p * vec3(volume_dims)));
-        //float val = texelFetch(volume, p_ivec, 0).r;
-        float val = texture(sampler3D(volume, volume_smp), p_ivec).r;
-        vec4 val_color = vec4(texture(sampler2D(colormap, colormap_smp), vec2(val, 0.5)).rgb, val);
-        val_color.a = 1.0 - pow(1.0 - val_color.a, dt_scale);
-        FragColor.rgb += (1.0 - FragColor.a) * val_color.a * val_color.rgb;
-        FragColor.a += (1.0 - FragColor.a) * val_color.a;
-        if (FragColor.a >= 0.99) {
-            break;
-        }
-        p += ray_dir * dt;
-    }
-    //FragColor = vec4(0.0f, 1.0f, 0.0f, 1.0f);
-    //FragColor.r = linear_to_srgb(FragColor.r);
-    //FragColor.g = linear_to_srgb(FragColor.g);
-    //FragColor.b = linear_to_srgb(FragColor.b);
+	// Step 1: Normalize the view ray
+	vec3 ray_dir = normalize(vray_dir);
+
+	// Step 2: Intersect the ray with the volume bounds to find the interval
+	// along the ray overlapped by the volume.
+	vec2 t_hit = intersect_box(transformed_eye, ray_dir);
+	if (t_hit.x > t_hit.y) {
+		discard;
+	}
+	// We don't want to sample voxels behind the eye if it's
+	// inside the volume, so keep the starting point at or in front
+	// of the eye
+	t_hit.x = max(t_hit.x, 0.0);
+
+	// Step 3: Compute the step size to march through the volume grid
+	vec3 dt_vec = 1.0 / (vec3(volume_dims) * abs(ray_dir));
+	float dt = min(dt_vec.x, min(dt_vec.y, dt_vec.z));
+
+    FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    
+	// Step 4: Starting from the entry point, march the ray through the volume
+	// and sample it
+	vec3 p = transformed_eye + t_hit.x * ray_dir;
+	for (float t = t_hit.x; t < t_hit.y; t += dt) {
+		// Step 4.1: Sample the volume, and color it by the transfer function.
+		// Note that here we don't use the opacity from the transfer function,
+		// and just use the sample value as the opacity
+		float val = texture(sampler3D(volume, volume_smp), p).r;
+        
+        // val_color = vec4(texture(transfer_fcn, vec2(val, 0.5)).rgb, val);
+		vec4 val_color = vec4(texture(sampler2D(colormap, colormap_smp), vec2(val, 0.5)).rgb, val);
+
+		// Step 4.2: Accumulate the color and opacity using the front-to-back
+		// compositing equation
+		FragColor.rgb += (1.0 - FragColor.a) * val_color.a * val_color.rgb;
+		FragColor.a += (1.0 - FragColor.a) * val_color.a;
+
+		// Optimization: break out of the loop when the color is near opaque
+		if (FragColor.a >= 0.95) {
+			break;
+		}
+		p += ray_dir * dt;
+	}
 }
 @end
 

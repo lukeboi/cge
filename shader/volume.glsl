@@ -7,6 +7,7 @@ uniform vs_vol_params {
     mat4 proj_view;
     vec3 eye_pos;
     vec3 volume_scale;
+	vec3 volume_translation;
 };
 
 out vec3 vray_dir;
@@ -14,7 +15,7 @@ flat out vec3 transformed_eye;
 
 void main(void) {
 	// Translate the cube to center it at the origin.
-	vec3 volume_translation = vec3(0.5) - volume_scale * 0.5;
+	//vec3 volume_translation = vec3(0.5) - volume_scale * 0.5;
 	gl_Position = proj_view * vec4(pos * volume_scale + volume_translation, 1);
 
 	// Compute eye position and ray directions in the unit cube space
@@ -76,7 +77,7 @@ float linear_to_srgb(float x) {
 }
 
 void main(void) {
-	// Step 1: Normalize the view ray
+	// Step 1: Normalize the view raya
 	vec3 ray_dir = normalize(vray_dir);
 
 	// Step 2: Intersect the ray with the volume bounds to find the interval
@@ -106,7 +107,7 @@ void main(void) {
 		float val = texture(sampler3D(volume, volume_smp), p).r;
         
         // val_color = vec4(texture(transfer_fcn, vec2(val, 0.5)).rgb, val);
-		vec4 val_color = vec4(texture(sampler2D(colormap, colormap_smp), vec2(val, 0.5)).rgb, val);
+		vec4 val_color = vec4(texture(sampler2D(colormap, colormap_smp), vec2(val * .999 + 0.0005, 0.5)).rgb, val);
 
 		// Step 4.2: Accumulate the color and opacity using the front-to-back
 		// compositing equation
@@ -114,11 +115,14 @@ void main(void) {
 		FragColor.a += (1.0 - FragColor.a) * val_color.a;
 
 		// Optimization: break out of the loop when the color is near opaque
-		if (FragColor.a >= 0.95) {
+		if (FragColor.a >= 0.98) {
 			break;
 		}
 		p += ray_dir * dt;
 	}
+    FragColor.r = linear_to_srgb(FragColor.r);
+    FragColor.g = linear_to_srgb(FragColor.g);
+    FragColor.b = linear_to_srgb(FragColor.b);
 }
 @end
 

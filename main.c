@@ -110,7 +110,7 @@ static struct {
 fastObjMesh* mesh;
 
 // Temp code to generate a colormap
-#define COLORMAP_WIDTH 256
+#define COLORMAP_WIDTH 260
 #define COLORMAP_HEIGHT 1
 
 uint8_t colormap_data[COLORMAP_WIDTH * 4]; // 4 channels (RGBA) per pixel
@@ -134,7 +134,7 @@ void init(void) {
     memset(state.key_down, 0, sizeof(state.key_down)); // set key down to zero
 
     for (int i = 0; i < 5; i++) {
-        update_transform((float)i, &(transform_c_t){
+        update_transform(i, &(transform_c_t){
             .position = HMM_Vec3((float)i * 3.1f - 6.0f, (float)i * 1.1f - 5.0f, -10.0f),
             .rotation = HMM_Vec3((float)i * 20.0f, (float)i * 20.0f, 0.0f)
         });
@@ -404,15 +404,43 @@ void init(void) {
     //     // printf("%d\n", ecs.volumes[0]._volume[i]);
     // }
 
-
     for (int z = 0; z < 100; z++) {
         for (int y = 0; y < 100; y++) {
             for (int x = 0; x < 100; x++) {
                 // Calculate the linear gradient value along the X axis
-                ecs.volumes[0]._volume[x + y * 100 + z * 100 * 100] = (uint8_t)((float)x / (100 - 1) * 255);
+                if (y > 1 || y < 1) {
+                    ecs.volumes[0]._volume[x + y * 100 + z * 100 * 100] = (uint8_t)0;
+                }
+                else{
+                    ecs.volumes[0]._volume[x + y * 100 + z * 100 * 100] = (uint8_t)((float)x / (100 - 1) * 255);
+                }
             }
         }
     }
+
+    // int size = 100;
+    // int radius = size / 2;
+    // int centerX = radius;
+    // int centerY = radius;
+    // int centerZ = radius;
+
+    // for (int z = 0; z < size; z++) {
+    //     for (int y = 0; y < size; y++) {
+    //         for (int x = 0; x < size; x++) {
+    //             // Calculate the distance from the center
+    //             int dx = x - centerX;
+    //             int dy = y - centerY;
+    //             int dz = z - centerZ;
+    //             float distance = sqrt(dx * dx + dy * dy + dz * dz);
+
+    //             if (distance > radius) {
+    //                 ecs.volumes[0]._volume[x + y * size + z * size * size] = (uint8_t)0;
+    //             } else {
+    //                 ecs.volumes[0]._volume[x + y * size + z * size * size] = (uint8_t)((float)x / (size - 1) * 255);
+    //             }
+    //         }
+    //     }
+    // }
     state.volume_img = sg_make_image(&(sg_image_desc){
         .type = SG_IMAGETYPE_3D,
         .width = 100, // Your volume dimensions
@@ -646,6 +674,33 @@ void frame(void) {
     if (gui.show_imgui_demo) igShowDemoWindow(0);
     igEnd();
 
+    // Entity Settings UI Code
+    igSetNextWindowPos((ImVec2){10, 320}, ImGuiCond_Once, (ImVec2){0,0});
+    igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
+    igBegin("Entity Settings", 0, ImGuiWindowFlags_None);
+    for (int i = 0; i < NUM_COMPONENTS; i++) {
+        char entity_label[64];
+        if (ecs.transforms_valid[i]) {
+            snprintf(entity_label, sizeof(entity_label), "Entity %d", i);
+        }
+        else {
+            snprintf(entity_label, sizeof(entity_label), "Entity %d (invalid)", i);
+        }
+        if (igTreeNodeEx_Str(entity_label, ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
+            igCheckbox("Transform Valid", &ecs.transforms_valid[i]);
+            igCheckbox("Mesh Valid", &ecs.mesh_valid[i]);
+            igCheckbox("Volume Valid", &ecs.volume_valid[i]);
+            
+            // Add XYZ input for each entity's position
+            if (ecs.transforms_valid[i]) {
+                igDragFloat3("Position", &ecs.transforms[i].position.X, 0.1f, -10.0f, 10.0f, "%.1f", 0);
+                igDragFloat3("Rotation", &ecs.transforms[i].rotation.X, 0.1f, -360.0f, 360.0f, "%.1f", 0);
+            }
+
+            igTreePop();
+        }
+    }
+    igEnd();
 
     igSetNextWindowPos((ImVec2){300,20}, ImGuiCond_Once, (ImVec2){0,0});
     igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
@@ -736,31 +791,38 @@ void frame(void) {
         }
     }
 
+    // Render each volume if it exists
+    for (int i = 0; i < NUM_COMPONENTS; i++) {
+        if (ecs.transforms_valid[i] && ecs.volume_valid[i]) {
+            sg_apply_pipeline(state.volume_pip);
+            sg_apply_bindings(&state.volume_bind);
 
-    if (ecs.volume_valid[0]) {
-        sg_apply_pipeline(state.volume_pip);
-        sg_apply_bindings(&state.volume_bind);
+            fs_vol_params_t fs_vol_params = {
+                // .camera_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
+                .volume_dims = { 100, 100, 100 },
+                .dt_scale = 0.005f,
+                .near_clip = 0.01f,
+                .far_clip = 1000.0f,
+                .new_box_min = { 0.0f, 0.0f, 0.0f },
+                .new_box_max = { 1.0f, 1.0f, 1.0f }
+            };
+            sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_vol_params, &SG_RANGE(fs_vol_params));
 
-        fs_vol_params_t fs_vol_params = {
-            // .camera_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
-            .volume_dims = { 100, 100, 100 },
-            .dt_scale = 0.005f,
-            .near_clip = 0.01f,
-            .far_clip = 1000.0f,
-            .new_box_min = { 0.0f, 0.0f, 0.0f },
-            .new_box_max = { 1.0f, 1.0f, 1.0f }
-        };
-        sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_vol_params, &SG_RANGE(fs_vol_params));
+            vs_vol_params_t vs_vol_params = {
+                //.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[0]._transform),
+                .proj_view = view_proj,
+                .eye_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
+                .volume_scale = { 1.0f, 1.0f, 1.0f },
+                .volume_translation = {
+                    ecs.transforms[i].position.X,
+                    ecs.transforms[i].position.Y,
+                    ecs.transforms[i].position.Z
+                }
+            };
+            sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_vol_params));
 
-        vs_vol_params_t vs_vol_params = {
-            //.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[0]._transform),
-            .proj_view = view_proj,
-            .eye_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
-            .volume_scale = { 1.0f, 1.0f, 1.0f }
-        };
-        sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_vol_params));
-
-        sg_draw(0, 36, 1); // Assuming 4 vertices for the volume quad
+            sg_draw(0, 36, 1); // Assuming 4 vertices for the volume quad
+        }
     }
 
 

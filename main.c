@@ -50,8 +50,11 @@ typedef struct {
 } mesh_c_t;
 
 typedef struct {
-    uint8_t _volume[100 * 100 * 100]; // All volumes come in increments of 500x500x500 // TODO malloc
+    // uint8_t _volume[50 * 50 * 50]; // All volumes come in increments of 500x500x500 // TODO malloc
+    uint8_t* _volume;  // Pointer to dynamically allocated volume data
     hmm_vec3 position; // Position of the volume
+    sg_image img;
+    sg_buffer vbuf;
 } volume_c_t;
 
 // ECS Global struct
@@ -81,6 +84,46 @@ void update_transform(int index, transform_c_t *data) {
     memcpy(&ecs.transforms[index], data, sizeof(transform_c_t));
 }
 
+// Update or create a volume. Will set it to valid and malloc as needed
+void update_volume(int index, uint8_t* volume_data) {
+    ecs.volume_valid[index] = true;
+    if (ecs.volumes[index]._volume == NULL) {
+        ecs.volumes[index]._volume = (uint8_t*)calloc(50 * 50 * 50, sizeof(uint8_t));
+    }
+    
+    memcpy(ecs.volumes[index]._volume, volume_data, 50 * 50 * 50 * sizeof(uint8_t));
+
+    ecs.volumes[index].img = sg_make_image(&(sg_image_desc){
+        .type = SG_IMAGETYPE_3D,
+        .width = 50, // Your volume dimensions
+        .height = 50,
+        .num_slices = 50,
+        .pixel_format = SG_PIXELFORMAT_R8, // Assuming 8-bit grayscale volume
+        .data.subimage[0][0] = {
+            .ptr = ecs.volumes[index]._volume,
+            .size = 50 * 50 * 50 * sizeof(uint8_t)
+        },
+        .label = "volume-texture"
+    });
+}
+
+// Free a volume
+void free_volume(int index) {
+    ecs.volume_valid[index] = false;
+    free(ecs.volumes[index]._volume);
+}
+
+// Set a volume to random values
+void randomize_volume(int index) {
+    // Prepare volume data
+    uint8_t volume_data[50 * 50 * 50] = {0};
+    for (int i = 0; i < 50 * 50 * 50; i++) {
+        volume_data[i] = rand() % 256;
+    }
+
+    update_volume(index, volume_data);
+}
+
 // Global state
 static struct {
     ImFont* default_font;
@@ -98,13 +141,15 @@ static struct {
     sg_pipeline mesh_pip;
     sg_bindings mesh_bind;
     sg_pipeline volume_pip;
-    sg_bindings volume_bind;
-    sg_image volume_img;
+    // sg_image volume_img;
+    sg_bindings volume_bind; // Temp var which is used to process the volume currently getting rendered
     sg_pass_action pass_action;
     bool key_down[256]; // keeps track of keypresses
+    bool show_debug_cubes; // Checkbox to show debug cube for each entity
 } state = {
     .cam_fov = 60.0f,
-    .cam_drift = false
+    .cam_drift = false,
+    .show_debug_cubes = true,
 };
 
 fastObjMesh* mesh;
@@ -397,26 +442,45 @@ void init(void) {
     });
 
 
-    // set first volume to random
-    ecs.volume_valid[0] = true;
-    // for (int i = 0; i < 100 * 100 * 100; i++) {
-    //     ecs.volumes[0]._volume[i] = i % 256;
-    //     // printf("%d\n", ecs.volumes[0]._volume[i]);
-    // }
 
-    for (int z = 0; z < 100; z++) {
-        for (int y = 0; y < 100; y++) {
-            for (int x = 0; x < 100; x++) {
-                // Calculate the linear gradient value along the X axis
-                if (y > 1 || y < 1) {
-                    ecs.volumes[0]._volume[x + y * 100 + z * 100 * 100] = (uint8_t)0;
-                }
-                else{
-                    ecs.volumes[0]._volume[x + y * 100 + z * 100 * 100] = (uint8_t)((float)x / (100 - 1) * 255);
+    // Update volume for testing
+    for (int i = 0; i < 1; i++) {
+        // Prepare volume data
+        uint8_t volume_data[50 * 50 * 50] = {0};
+        for (int z = 0; z < 50; z++) {
+            for (int y = 0; y < 50; y++) {
+                for (int x = 0; x < 50; x++) {
+                    if (y == 1) {
+                        volume_data[x + y * 50 + z * 50 * 50] = (uint8_t)((float)x / (50 - 1) * 255);
+                    }
                 }
             }
         }
+
+        update_volume(i, volume_data);
     }
+
+    // THIS WORKS
+    // // set first volume to random
+    // ecs.volume_valid[0] = true;
+    // // for (int i = 0; i < 100 * 100 * 100; i++) {
+    // //     ecs.volumes[0]._volume[i] = i % 256;
+    // //     // printf("%d\n", ecs.volumes[0]._volume[i]);
+    // // }
+
+    // for (int z = 0; z < 100; z++) {
+    //     for (int y = 0; y < 100; y++) {
+    //         for (int x = 0; x < 100; x++) {
+    //             // Calculate the linear gradient value along the X axis
+    //             if (y > 1 || y < 1) {
+    //                 ecs.volumes[0]._volume[x + y * 50 + z * 50 * 50] = (uint8_t)0;
+    //             }
+    //             else{
+    //                 ecs.volumes[0]._volume[x + y * 50 + z * 50 * 50] = (uint8_t)((float)x / (50 - 1) * 255);
+    //             }
+    //         }
+    //     }
+    // }
 
     // int size = 100;
     // int radius = size / 2;
@@ -441,18 +505,18 @@ void init(void) {
     //         }
     //     }
     // }
-    state.volume_img = sg_make_image(&(sg_image_desc){
-        .type = SG_IMAGETYPE_3D,
-        .width = 100, // Your volume dimensions
-        .height = 100,
-        .num_slices = 100,
-        .pixel_format = SG_PIXELFORMAT_R8, // Assuming 8-bit grayscale volume
-        .data.subimage[0][0] = {
-            .ptr = ecs.volumes[0]._volume,
-            .size = sizeof(ecs.volumes[0]._volume)
-        },
-        .label = "volume-texture"
-    });
+    // state.volume_img = sg_make_image(&(sg_image_desc){
+    //     .type = SG_IMAGETYPE_3D,
+    //     .width = 50, // Your volume dimensions
+    //     .height = 50,
+    //     .num_slices = 50,
+    //     .pixel_format = SG_PIXELFORMAT_R8, // Assuming 8-bit grayscale volume
+    //     .data.subimage[0][0] = {
+    //         .ptr = ecs.volumes[0]._volume,
+    //         .size = sizeof(ecs.volumes[0]._volume)
+    //     },
+    //     .label = "volume-texture"
+    // });
 
     // Create the colormap
     create_colormap();
@@ -536,13 +600,14 @@ void init(void) {
         .index_buffer = volume_ibuf, // Assuming you have indices for the volume
         // .fs_images[SLOT_tex] = state.volume_img
     };
-    state.volume_bind.fs.images[SLOT_volume] = state.volume_img;
+    // //THIS WORKS
+    // state.volume_bind.fs.images[SLOT_volume] = state.volume_img;
     state.volume_bind.fs.samplers[SLOT_volume_smp] = sg_make_sampler(&(sg_sampler_desc){
         .min_filter = SG_FILTER_NEAREST,
         .mag_filter = SG_FILTER_NEAREST,
     });
     // Add the colormap image to the bindings
-    state.volume_bind.fs.images[SLOT_colormap] = colormap_img;
+    // state.volume_bind.fs.images[SLOT_colormap] = colormap_img;
     state.volume_bind.fs.samplers[SLOT_colormap_smp] = sg_make_sampler(&(sg_sampler_desc){
         .min_filter = SG_FILTER_NEAREST,
         .mag_filter = SG_FILTER_NEAREST,
@@ -660,6 +725,7 @@ void frame(void) {
     igBegin("Tippelations!", 0, ImGuiWindowFlags_None);
     igText("Wagon Engine");
     igText("FPS %.1f\n", 1. / sapp_frame_duration());
+    igCheckbox("Show Debug Cubes", &state.show_debug_cubes);
     igText("Camera x, y, z (%.2f, %.2f, %.2f)", state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z);
     igText("Camera Rx, Ry (%.2f, %.2f)", state.cam_rx, state.cam_ry);
     igText("Camera FOV %.1f", state.cam_fov);
@@ -697,17 +763,26 @@ void frame(void) {
                 igDragFloat3("Rotation", &ecs.transforms[i].rotation.X, 0.1f, -360.0f, 360.0f, "%.1f", 0);
             }
 
+            // Add a button to randomize the volume, if volume is valid
+            if (ecs.volume_valid[i]) {
+                if (igButton("Randomize Volume", (ImVec2){0, 0})) {
+                    randomize_volume(i);
+                }
+            }
+
+
             igTreePop();
         }
     }
     igEnd();
 
-    igSetNextWindowPos((ImVec2){300,20}, ImGuiCond_Once, (ImVec2){0,0});
-    igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
-    igBegin("2d scroll slice view", 0, ImGuiWindowFlags_None);
-    igSliderInt("Slice", &state.cam_rx, 0, 10, "%d", 0);
-    igText("h");
-    igEnd();
+    // I don't remember what this was for
+    // igSetNextWindowPos((ImVec2){300,20}, ImGuiCond_Once, (ImVec2){0,0});
+    // igSetNextWindowSize((ImVec2){600, 300}, ImGuiCond_Once);
+    // igBegin("2d scroll slice view", 0, ImGuiWindowFlags_None);
+    // igSliderInt("Slice", &state.cam_rx, 0, 10, "%d", 0);
+    // igText("h");
+    // igEnd();
 
     const float w = sapp_widthf();
     const float h = sapp_heightf();
@@ -719,6 +794,7 @@ void frame(void) {
     if (state.cam_drift) {
         state.cam_rx += 1.0f * t;
         state.cam_ry += 0.5f * t;
+        // Wrap around camera left/right
         if (state.cam_rx >= 90.0f) {
             state.cam_rx = -90.0f;
         }
@@ -770,12 +846,14 @@ void frame(void) {
     }
     
     // Optional per-entity rendering of a cube mesh at the transform for debugging
-    for (int i = 0; i < NUM_COMPONENTS; i++) {
-        if (ecs.transforms_valid[i]) {
-            vs_params_t vs_params;
-            vs_params.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[i]._transform);
-            sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_params));
-            sg_draw(0, 36, 1);
+    if (state.show_debug_cubes) {
+        for (int i = 0; i < NUM_COMPONENTS; i++) {
+            if (ecs.transforms_valid[i]) {
+                vs_params_t vs_params;
+                vs_params.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[i]._transform);
+                sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &SG_RANGE(vs_params));
+                sg_draw(0, 36, 1);
+            }
         }
     }
 
@@ -794,8 +872,26 @@ void frame(void) {
     // Render each volume if it exists
     for (int i = 0; i < NUM_COMPONENTS; i++) {
         if (ecs.transforms_valid[i] && ecs.volume_valid[i]) {
+            if (ecs.volume_valid[i] && ecs.volumes[i]._volume == NULL) { // TODO make this a better null check
+                printf("VOLUME DATA FROM ENTITY NUMBER %d UNALLOCATED!\n", i);
+                continue;
+            }
+            printf("CONTINUING %d\n", i);
+            // sg_apply_pipeline(state.volume_pip);
+            // sg_apply_bindings(&state.volume_bind);
+
             sg_apply_pipeline(state.volume_pip);
-            sg_apply_bindings(&state.volume_bind);
+            sg_bindings volume_bind = {
+                .vertex_buffers[0] = state.volume_bind.vertex_buffers[0],
+                .index_buffer = state.volume_bind.index_buffer,
+            };
+
+            volume_bind.fs.images[SLOT_volume] = ecs.volumes[i].img;
+            volume_bind.fs.samplers[SLOT_volume_smp] = state.volume_bind.fs.samplers[SLOT_volume_smp];
+            // Add the colormap image to the bindings
+            volume_bind.fs.images[SLOT_colormap] = colormap_img;
+            volume_bind.fs.samplers[SLOT_colormap_smp] = state.volume_bind.fs.samplers[SLOT_colormap_smp];
+            sg_apply_bindings(&volume_bind);
 
             fs_vol_params_t fs_vol_params = {
                 // .camera_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },

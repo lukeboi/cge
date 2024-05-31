@@ -8,6 +8,8 @@
         "sokol_app.h": "c",
         "sokol_log.h": "c",
         "filesystem": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "__locale": "c",
+        "locale": "c"
     }
 }

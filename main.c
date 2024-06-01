@@ -29,6 +29,7 @@
 // ECS
 // TODO this is all ugly
 #define NUM_COMPONENTS 32
+#define VOLUME_DIMENSIONS 50
 
 // Define component structs
 typedef struct {
@@ -88,20 +89,20 @@ void update_transform(int index, transform_c_t *data) {
 void update_volume(int index, uint8_t* volume_data) {
     ecs.volume_valid[index] = true;
     if (ecs.volumes[index]._volume == NULL) {
-        ecs.volumes[index]._volume = (uint8_t*)calloc(50 * 50 * 50, sizeof(uint8_t));
+        ecs.volumes[index]._volume = (uint8_t*)calloc(VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS, sizeof(uint8_t));
     }
     
-    memcpy(ecs.volumes[index]._volume, volume_data, 50 * 50 * 50 * sizeof(uint8_t));
+    memcpy(ecs.volumes[index]._volume, volume_data, VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * sizeof(uint8_t));
 
     ecs.volumes[index].img = sg_make_image(&(sg_image_desc){
         .type = SG_IMAGETYPE_3D,
-        .width = 50, // Your volume dimensions
-        .height = 50,
-        .num_slices = 50,
+        .width = VOLUME_DIMENSIONS, // Your volume dimensions
+        .height = VOLUME_DIMENSIONS,
+        .num_slices = VOLUME_DIMENSIONS,
         .pixel_format = SG_PIXELFORMAT_R8, // Assuming 8-bit grayscale volume
         .data.subimage[0][0] = {
             .ptr = ecs.volumes[index]._volume,
-            .size = 50 * 50 * 50 * sizeof(uint8_t)
+            .size = VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * sizeof(uint8_t)
         },
         .label = "volume-texture"
     });
@@ -116,13 +117,61 @@ void free_volume(int index) {
 // Set a volume to random values
 void randomize_volume(int index) {
     // Prepare volume data
-    uint8_t volume_data[50 * 50 * 50] = {0};
-    for (int i = 0; i < 50 * 50 * 50; i++) {
+    uint8_t volume_data[VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS] = {0};
+    for (int i = 0; i < VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS; i++) {
         volume_data[i] = rand() % 256;
     }
 
     update_volume(index, volume_data);
 }
+
+void sphere_volume(int index) {
+    // Prepare volume data
+    uint8_t volume_data[VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS] = {0};
+
+    // Sphere parameters
+    int center = VOLUME_DIMENSIONS / 2; // Center of the sphere
+    int radius = VOLUME_DIMENSIONS / 2; // Radius of the sphere
+
+    for (int z = 0; z < VOLUME_DIMENSIONS; z++) {
+        for (int y = 0; y < VOLUME_DIMENSIONS; y++) {
+            for (int x = 0; x < VOLUME_DIMENSIONS; x++) {
+                int dx = x - center;
+                int dy = y - center;
+                int dz = z - center;
+                if (dx * dx + dy * dy + dz * dz <= radius * radius) {
+                    int index = z * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS + y * VOLUME_DIMENSIONS + x;
+                    volume_data[index] = rand() % 256;
+                }
+            }
+        }
+    }
+
+    update_volume(index, volume_data);
+}
+
+void cube_volume(int index) {
+    // Prepare volume data
+    uint8_t volume_data[VOLUME_DIMENSIONS * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS] = {0};
+
+    for (int z = 0; z < VOLUME_DIMENSIONS; z++) {
+        for (int y = 0; y < VOLUME_DIMENSIONS; y++) {
+            for (int x = 0; x < VOLUME_DIMENSIONS; x++) {
+                // Check if the point is on an edge of the cube
+                if ((x == 0 || x == VOLUME_DIMENSIONS - 1) || (y == 0 || y == VOLUME_DIMENSIONS - 1) || (z == 0 || z == VOLUME_DIMENSIONS - 1)) {
+                    // Exclude the points that are not on the wireframe (i.e., the ones that are in the faces but not on the edges)
+                    if ((x == 0 || x == VOLUME_DIMENSIONS - 1) + (y == 0 || y == VOLUME_DIMENSIONS - 1) + (z == 0 || z == VOLUME_DIMENSIONS - 1) > 1) {
+                        int index = z * VOLUME_DIMENSIONS * VOLUME_DIMENSIONS + y * VOLUME_DIMENSIONS + x;
+                        volume_data[index] = 255;
+                    }
+                }
+            }
+        }
+    }
+
+    update_volume(index, volume_data);
+}
+
 
 // Global state
 static struct {
@@ -444,21 +493,7 @@ void init(void) {
 
 
     // Update volume for testing
-    for (int i = 0; i < 1; i++) {
-        // Prepare volume data
-        uint8_t volume_data[50 * 50 * 50] = {0};
-        for (int z = 0; z < 50; z++) {
-            for (int y = 0; y < 50; y++) {
-                for (int x = 0; x < 50; x++) {
-                    if (y == 1) {
-                        volume_data[x + y * 50 + z * 50 * 50] = (uint8_t)((float)x / (50 - 1) * 255);
-                    }
-                }
-            }
-        }
-
-        update_volume(i, volume_data);
-    }
+    randomize_volume(1);
 
     // THIS WORKS
     // // set first volume to random
@@ -767,6 +802,12 @@ void frame(void) {
             if (ecs.volume_valid[i]) {
                 if (igButton("Randomize Volume", (ImVec2){0, 0})) {
                     randomize_volume(i);
+                }
+                if (igButton("Set to sphere", (ImVec2){0, 0})) {
+                    sphere_volume(i);
+                }
+                if (igButton("Set to cube", (ImVec2){0, 0})) {
+                    cube_volume(i);
                 }
             }
 

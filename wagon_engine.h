@@ -1,6 +1,10 @@
+#ifndef WAGON_ENGINE_H
+#define WAGON_ENGINE_H
+
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
+#include <libgen.h>
 
 #define HANDMADE_MATH_IMPLEMENTATION
 #define HANDMADE_MATH_NO_SSE
@@ -14,6 +18,7 @@
 
 #define SOKOL_IMPL
 #define SOKOL_METAL
+#define SOKOL_NO_ENTRY
 #include "sokol_app.h"
 #include "sokol_gfx.h"
 #include "sokol_log.h"
@@ -25,6 +30,13 @@
 #include "shader/cube.glsl.h"
 #include "shader/volume.glsl.h"
 // #include "shader/phong.glsl.h"
+
+static void wagon_run();  // Add this line to declare the function
+
+// Macro to get the directory of the current file
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#define HEADER_FILE TOSTRING(__FILE__)
 
 // ECS
 // TODO this is all ugly
@@ -222,9 +234,27 @@ void create_colormap(void) {
 }
 // End temp code
 
+// Function to get the directory from __FILE__
+void get_dir_from_file(const char *file_path, char *dir_path, size_t size) {
+    const char *last_slash = strrchr(file_path, '/');
+    if (last_slash) {
+        size_t dir_length = last_slash - file_path;
+        if (dir_length < size) {
+            strncpy(dir_path, file_path, dir_length);
+            dir_path[dir_length] = '\0';
+        }
+    } else {
+        // No slash found, set dir_path to empty string
+        strncpy(dir_path, "", size);
+    }
+}
 
 // Sokol init
 void init(void) {
+    // Used for relative paths on default font and mesh
+    char dir_path[1024];
+    get_dir_from_file(__FILE__, dir_path, sizeof(dir_path));
+
     memset(state.key_down, 0, sizeof(state.key_down)); // set key down to zero
 
     for (int i = 0; i < 5; i++) {
@@ -263,10 +293,29 @@ void init(void) {
     // Load a custom font in imgui
     // TODO: Make this it's own function
     // TODO: Fix antialiasing/appears blurry on text
-    ImGuiIO *io = igGetIO();
-    gui.main_font = ImFontAtlas_AddFontFromFileTTF(io->Fonts, "assets/NotoSans-Regular.ttf", 16, NULL, NULL);
-    // gui.main_font = ImFontAtlas_AddFontFromFileTTF(io->Fonts, "lib/cimgui/imgui/misc/fonts/Roboto-Medium.ttf", 16, NULL, NULL); // This works but is also blurry
+    // ImGuiIO *io = igGetIO();
+    // gui.main_font = ImFontAtlas_AddFontFromFileTTF(io->Fonts, "assets/NotoSans-Regular.ttf", 16, NULL, NULL);
+
     
+    char font_path[1024];
+    snprintf(font_path, sizeof(font_path), "%s/assets/NotoSans-Regular.ttf", dir_path);
+    float font_size = 16.0f;
+
+    printf("Font path: %s\n", font_path);
+
+
+    // Load the custom font inline using variables
+    ImGuiIO* io = igGetIO();
+    ImFont* main_font = ImFontAtlas_AddFontFromFileTTF(io->Fonts, font_path, font_size, NULL, NULL);
+    if (main_font == NULL) {
+        // Handle font loading failure
+        printf("Failed to load font: %s\n", font_path);
+    }
+    printf("FONTY LOADY LOAD\n");
+    // io->Fonts->Flags |= ImGuiFreeTypeBuilderFlags_NoHinting; // Example flag for better antialiasing (optional)
+
+
+
     // Create font atlas
     unsigned char* font_pixels;
     int font_width, font_height;
@@ -282,6 +331,7 @@ void init(void) {
     font_img_desc.label = "sokol-imgui-font-image";
     _simgui.font_img = sg_make_image(&font_img_desc);
 
+    printf("h\n");
     // Set atlas to right texture
     simgui_image_desc_t img_desc;
     _simgui_clear(&img_desc, sizeof(img_desc));
@@ -290,8 +340,15 @@ void init(void) {
     _simgui.default_font = simgui_make_image(&img_desc);
     io->Fonts->TexID = simgui_imtextureid(_simgui.default_font);
 
-    mesh = fast_obj_read("assets/monkey.obj");
+
+    char mesh_path[1024];
+    snprintf(mesh_path, sizeof(mesh_path), "%s/assets/monkey.obj", dir_path);
+    printf("hi\n");
+    mesh = fast_obj_read(mesh_path);
     int face_count = mesh->face_count;
+    printf("hih\n");
+
+    printf("MESHY LOAD LOAD");
 
     for(int i = 0; i < mesh->index_count; i++) {
         printf("= %d\n", mesh->indices[i].p);
@@ -1020,19 +1077,39 @@ static void event(const sapp_event* ev) {
     if (ev->type == SAPP_EVENTTYPE_KEY_UP) state.key_down[ev->key_code] = false;
 }
 
-sapp_desc sokol_main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
-    return (sapp_desc){
+// sapp_desc sokol_main(int argc, char* argv[]) {
+//     (void)argc;
+//     (void)argv;
+//     return (sapp_desc){
+//         .init_cb = init,
+//         .frame_cb = frame,
+//         .cleanup_cb = cleanup,
+//         .event_cb = event,
+//         .width = 1080,
+//         .height = 720,
+//         .sample_count = 4,
+//         .window_title = "Wagon Engine",
+//         .icon.sokol_default = true,
+//         .logger.func = slog_func,
+//     };
+// }
+
+static void wagon_run() {
+    // app_state_t* state = calloc(1, sizeof(app_state_t));
+    sapp_run(&(sapp_desc){
         .init_cb = init,
         .frame_cb = frame,
         .cleanup_cb = cleanup,
         .event_cb = event,
-        .width = 1080,
-        .height = 720,
+        .width = 800,
+        .height = 600,
         .sample_count = 4,
-        .window_title = "Wagon Engine",
+        .window_title = "Noentry (sokol-app)",
         .icon.sokol_default = true,
         .logger.func = slog_func,
-    };
+    });
+    // free(state);    // NOTE: on some platforms, this isn't reached on exit
+    // return 0;
 }
+
+#endif // WAGON_ENGINE_H

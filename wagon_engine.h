@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <libgen.h>
+#include <time.h>
 
 #define HANDMADE_MATH_IMPLEMENTATION
 #define HANDMADE_MATH_NO_SSE
@@ -24,7 +25,7 @@
 #include "sokol_log.h"
 #include "sokol_glue.h"
 #include "sokol_imgui.h"
-
+#include "sokol_time.h"
 #include "lib/stb/stb_image.h"
 
 #include "shader/cube.glsl.h"
@@ -207,6 +208,8 @@ static struct {
     sg_pass_action pass_action;
     bool key_down[256]; // keeps track of keypresses
     bool show_debug_cubes; // Checkbox to show debug cube for each entity
+    double start_time_ticks;
+    double wall_time_ms;
 } state = {
     .cam_fov = 60.0f,
     .cam_drift = false,
@@ -214,6 +217,10 @@ static struct {
 };
 
 fastObjMesh* mesh;
+
+// User code pointers
+void (*user_init_callback)();
+void (*user_frame_callback)();
 
 // Temp code to generate a colormap
 #define COLORMAP_WIDTH 260
@@ -229,7 +236,7 @@ void create_colormap(void) {
         colormap_data[i * 4 + 1] = 0;                           // Green channel
         colormap_data[i * 4 + 2] = (uint8_t)(t * 255);          // Red channel
         colormap_data[i * 4 + 3] = (uint8_t)((1.0f - t) * 255);                         // Alpha channel
-        printf("COLORMAP %d %d %d %d\n", colormap_data[i * 4 + 0], colormap_data[i * 4 + 1], colormap_data[i * 4 + 2], colormap_data[i * 4 + 3]);
+        // printf("COLORMAP %d %d %d %d\n", colormap_data[i * 4 + 0], colormap_data[i * 4 + 1], colormap_data[i * 4 + 2], colormap_data[i * 4 + 3]);
     }
 }
 // End temp code
@@ -274,6 +281,10 @@ void init(void) {
 
     // Camera set inital position
     state.cam_pos = HMM_Vec3(0.0f, 1.5f, 20.0f);
+    
+    stm_setup();
+    state.start_time_ticks = stm_now();
+    state.wall_time_ms = 0.0;
 
     // sg_setup(&(sg_desc){
     //     .context = sapp_sgcontext(),
@@ -313,8 +324,6 @@ void init(void) {
     }
     printf("FONTY LOADY LOAD\n");
     // io->Fonts->Flags |= ImGuiFreeTypeBuilderFlags_NoHinting; // Example flag for better antialiasing (optional)
-
-
 
     // Create font atlas
     unsigned char* font_pixels;
@@ -421,6 +430,8 @@ void init(void) {
             .data = (sg_range){ &ecs.meshes[0]._indices, ecs.meshes[0]._indices_size * sizeof(uint16_t) },
             .label = "mesh-indices"
         });
+
+        user_init_callback();
     }
     
     // From opengl tutorial
@@ -802,6 +813,8 @@ void camera_move(float dt) {
 }
 
 void frame(void) {
+    state.wall_time_ms = stm_ms(stm_since(state.start_time_ticks));
+
     // GUI Rendering
     simgui_new_frame(&(simgui_frame_desc_t){
         .width = sapp_width(),
@@ -817,6 +830,7 @@ void frame(void) {
     igBegin("Tippelations!", 0, ImGuiWindowFlags_None);
     igText("Wagon Engine");
     igText("FPS %.1f\n", 1. / sapp_frame_duration());
+    igText("Wall Time: %.2f ms", state.wall_time_ms);
     igCheckbox("Show Debug Cubes", &state.show_debug_cubes);
     igText("Camera x, y, z (%.2f, %.2f, %.2f)", state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z);
     igText("Camera Rx, Ry (%.2f, %.2f)", state.cam_rx, state.cam_ry);
@@ -889,6 +903,9 @@ void frame(void) {
     // Camera movement
     camera_move(t);
 
+    // User-defined per-frame logic
+    user_frame_callback();
+
     if (state.cam_drift) {
         state.cam_rx += 1.0f * t;
         state.cam_ry += 0.5f * t;
@@ -906,9 +923,6 @@ void frame(void) {
     hmm_mat4 proj = HMM_Perspective(state.cam_fov, w / h, 0.01f, 1000.0f);
     proj = HMM_MultiplyMat4(proj, rxm);
     proj = HMM_MultiplyMat4(proj, rym);
-    // hmm_mat4 view = HMM_LookAt(HMM_Vec3(0.0f, 1.5f, 20.0f), HMM_Vec3(0.0f, 0.0f, 0.0f), HMM_Vec3(0.0f, 1.0f, 0.0f));
-    // hmm_mat4 view = HMM_LookAt(state.cam_pos, HMM_Vec3(0.0f, 0.0f, 0.0f), HMM_Vec3(0.0f, 1.0f, 0.0f));
-    // view = HMM_AddMat4(HMM_Translate(state.cam_pos), view);
 
     // Camera position is multiplied by -1 because this is camera position and we offset everything else by this position
     hmm_mat4 view = HMM_Translate(HMM_MultiplyVec3f(state.cam_pos, -1.0f));
@@ -926,8 +940,6 @@ void frame(void) {
             ecs.transforms[i].rotation.X += 1.0f * t;
 
             hmm_mat4 model = HMM_Translate(transform->position);
-            // model = HMM_MultiplyMat4(model, rxm);
-            // model = HMM_MultiplyMat4(model, rym);
 
             // Apply individual rotations
             hmm_mat4 pitch = HMM_Rotate(transform->rotation.X, HMM_Vec3(1.0f, 0.0f, 0.0f));
@@ -974,9 +986,6 @@ void frame(void) {
                 printf("VOLUME DATA FROM ENTITY NUMBER %d UNALLOCATED!\n", i);
                 continue;
             }
-            printf("CONTINUING %d\n", i);
-            // sg_apply_pipeline(state.volume_pip);
-            // sg_apply_bindings(&state.volume_bind);
 
             sg_apply_pipeline(state.volume_pip);
             sg_bindings volume_bind = {
@@ -992,7 +1001,6 @@ void frame(void) {
             sg_apply_bindings(&volume_bind);
 
             fs_vol_params_t fs_vol_params = {
-                // .camera_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
                 .volume_dims = { 100, 100, 100 },
                 .dt_scale = 0.005f,
                 .near_clip = 0.01f,
@@ -1003,7 +1011,6 @@ void frame(void) {
             sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_fs_vol_params, &SG_RANGE(fs_vol_params));
 
             vs_vol_params_t vs_vol_params = {
-                //.mvp = HMM_MultiplyMat4(view_proj, ecs.transforms[0]._transform),
                 .proj_view = view_proj,
                 .eye_pos = { state.cam_pos.X, state.cam_pos.Y, state.cam_pos.Z },
                 .volume_scale = { 1.0f, 1.0f, 1.0f },
@@ -1018,12 +1025,6 @@ void frame(void) {
             sg_draw(0, 36, 1); // Assuming 4 vertices for the volume quad
         }
     }
-
-
-    // Apply volume pipeline and draw
-    // sg_apply_pipeline(state.volume_pip);
-    // sg_apply_bindings(&state.volume_bind);
-    // sg_draw(0, 0, 1);
 
     simgui_render();
     sg_end_pass();

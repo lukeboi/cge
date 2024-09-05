@@ -334,6 +334,75 @@ void update_mesh(int index, float* positions, unsigned position_count, uint16_t*
     };
 }
 
+void load_mesh(int index,const char* mesh_path, float r, float g, float b) {
+    printf("hi\n");
+    mesh = fast_obj_read(mesh_path);
+    int face_count = mesh->face_count;
+    printf("hih\n");
+
+    printf("MESHY LOAD LOAD");
+    
+    ecs.meshes[index]._indices_size = mesh->index_count;
+    ecs.meshes[index]._indices = (uint16_t*)malloc(ecs.meshes[index]._indices_size * sizeof(uint16_t));
+    if (!ecs.meshes[index]._indices) {
+        // Handle allocation failure
+        printf("Failed to allocate memory for mesh indices!");
+        return;
+    }
+    for (int i = 0; i < mesh->index_count; i++) {
+        printf("= %d\n", mesh->indices[i].p);
+        ecs.meshes[index]._indices[i] = mesh->indices[i].p;
+    }
+    ecs.meshes[index].face_count = mesh->face_count;
+
+    unsigned int i = 0; // Keep i def outside loop to use it to get size
+
+    ecs.meshes[index]._vertices_size = mesh->position_count * 7; // 3 for position, 4 for color
+    ecs.meshes[index]._vertices = (float*)malloc(ecs.meshes[index]._vertices_size * sizeof(float));
+    if (!ecs.meshes[index]._vertices) {
+        // Handle allocation failure
+        printf("Failed to allocate memory for mesh vertices!");
+        return;
+    }
+
+    for (i = 0; i < mesh->position_count; i++) {
+        printf("i is %d\n", i);
+        unsigned int pos = i * 7;
+        float red_rgba[] = { r, g, b, 1.0f};
+        ecs.meshes[index]._vertices[pos] = mesh->positions[i * 3];
+        ecs.meshes[index]._vertices[pos + 1] = mesh->positions[i * 3 + 1];
+        ecs.meshes[index]._vertices[pos + 2] = mesh->positions[i * 3 + 2];
+        memcpy(ecs.meshes[index]._vertices + pos + 3, red_rgba, 4 * sizeof(float)); // Color, just make it all red
+    }
+
+    ecs.mesh_valid[index] = true;
+
+    for (int k = 0; k < i * 7; k++) {
+        if (k % 7 == 0) {
+            printf("\n");
+        }
+        if (ecs.meshes[index]._vertices[k] >= 0.0f)
+            printf(" ");
+        printf("%.2f, ", ecs.meshes[index]._vertices[k]);
+    }
+
+    ecs.meshes[index].vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .data = (sg_range){ ecs.meshes[index]._vertices, i * 7 * sizeof(float) },
+        .label = "mesh-vertices"
+    });
+
+    ecs.meshes[index].ibuf = sg_make_buffer(&(sg_buffer_desc){
+        .type = SG_BUFFERTYPE_INDEXBUFFER,
+        .data = (sg_range){ ecs.meshes[index]._indices, ecs.meshes[index]._indices_size * sizeof(uint16_t) },
+        .label = "mesh-indices"
+    });
+
+    ecs.meshes[index].binding = (sg_bindings) {
+        .vertex_buffers[0] = ecs.meshes[index].vbuf,
+        .index_buffer = ecs.meshes[index].ibuf,
+    };
+}
+
 // Modify the init function
 void init(void) {
 
@@ -429,76 +498,29 @@ void init(void) {
     io->Fonts->TexID = simgui_imtextureid(_simgui.default_font);
 
 
-    char mesh_path[1024];
-    snprintf(mesh_path, sizeof(mesh_path), "%s/assets/monkey.obj", dir_path);
-    printf("hi\n");
-    mesh = fast_obj_read(mesh_path);
-    int face_count = mesh->face_count;
-    printf("hih\n");
+    // char mesh_path[1024];
+    // snprintf(mesh_path, sizeof(mesh_path), "%s/assets/monkey.obj", dir_path);
+    // printf("hi\n");
+    // mesh = fast_obj_read(mesh_path);
+    // int face_count = mesh->face_count;
+    // printf("hih\n");
 
     printf("MESHY LOAD LOAD");
     // update_mesh(2, mesh->positions, mesh->position_count, (uint16_t*)mesh->indices, mesh->index_count, mesh->face_count);
-    ecs.meshes[0]._indices_size = mesh->index_count;
-    ecs.meshes[0]._indices = (uint16_t*)malloc(ecs.meshes[0]._indices_size * sizeof(uint16_t));
-    if (!ecs.meshes[0]._indices) {
-        // Handle allocation failure
-        printf("Failed to allocate memory for mesh indices!");
-        return;
-    }
-    for (int i = 0; i < mesh->index_count; i++) {
-        printf("= %d\n", mesh->indices[i].p);
-        ecs.meshes[0]._indices[i] = mesh->indices[i].p;
-    }
-    ecs.meshes[0].face_count = mesh->face_count;
+    // Function to load and process mesh data
 
-    {
-        unsigned int i = 0; // Keep i def outside loop to use it to get size
-
-        ecs.meshes[0]._vertices_size = mesh->position_count * 7; // 3 for position, 4 for color
-        ecs.meshes[0]._vertices = (float*)malloc(ecs.meshes[0]._vertices_size * sizeof(float));
-        if (!ecs.meshes[0]._vertices) {
-            // Handle allocation failure
-            printf("Failed to allocate memory for mesh vertices!");
-            return;
-        }
-
-        for (i = 0; i < mesh->position_count; i++) {
-            printf("i is %d\n", i);
-            unsigned int pos = i * 7;
-            float red_rgba[] = { 1.0f, 0.0f, 0.0f, 1.0f };
-            // float v_pos[] = mesh->positions[pos];
-            ecs.meshes[0]._vertices[pos] = mesh->positions[i * 3];
-            ecs.meshes[0]._vertices[pos + 1] = mesh->positions[i * 3 + 1];
-            ecs.meshes[0]._vertices[pos + 2] = mesh->positions[i * 3 + 2];
-            // memcpy(ecs.meshes[0].vertices + pos, mesh->positions + pos, 3 * sizeof(float)); // XYZ point
-            memcpy(ecs.meshes[0]._vertices + pos + 3, red_rgba, 4 * sizeof(float)); // Color, just make it all red
-        }
-
-        ecs.mesh_valid[0] = true;
-
-        for (int k = 0; k < i * 7; k++) {
-            if (k % 7 == 0) {
-                printf("\n");
-            }
-            if (ecs.meshes[0]._vertices[k] >= 0.0f)
-                printf(" ");
-            printf("%.2f, ", ecs.meshes[0]._vertices[k]);
-        }
-
-        ecs.meshes[0].vbuf = sg_make_buffer(&(sg_buffer_desc){
-            .data = (sg_range){ ecs.meshes[0]._vertices, i * 7 * sizeof(float) },
-            .label = "mesh-vertices"
-        });
-
-        ecs.meshes[0].ibuf = sg_make_buffer(&(sg_buffer_desc){
-            .type = SG_BUFFERTYPE_INDEXBUFFER,
-            .data = (sg_range){ ecs.meshes[0]._indices, ecs.meshes[0]._indices_size * sizeof(uint16_t) },
-            .label = "mesh-indices"
-        });
-
-        user_init_callback();
-    }
+    // Call the function with the mesh path
+    char mesh_path[1024];
+    snprintf(mesh_path, sizeof(mesh_path), "%s/assets/monkey.obj", dir_path);
+    printf("Loading mesh: %s\n", mesh_path);
+    load_mesh(0, mesh_path, 1.0f, 0.0f, 0.0f);
     
+    char mesh_path_2[1024];
+    snprintf(mesh_path_2, sizeof(mesh_path_2), "%s/examples/basic/ball.obj", dir_path);
+    printf("Loading mesh: %s\n", mesh_path_2);
+    load_mesh(1, mesh_path_2, 0.0f, 1.0f, 0.0f);
+
+    user_init_callback();
     // From opengl tutorial
     // | pos     | | norm    | | tex |
     // [f] [f] [f] [f] [f] [f] [f] [f]
@@ -556,14 +578,14 @@ void init(void) {
     });
 
     /* create an index buffer for the cube */
-    uint16_t indices[] = {
-        0, 1, 2,  0, 2, 3,
-        6, 5, 4,  7, 6, 4,
-        8, 9, 10,  8, 10, 11,
-        14, 13, 12,  15, 14, 12,
-        16, 17, 18,  16, 18, 19,
-        22, 21, 20,  23, 22, 20
-    };
+uint16_t indices[] = {
+    0, 2, 1,  0, 3, 2,
+    6, 4, 5,  7, 4, 6,
+    8, 10, 9,  8, 11, 10,
+    14, 12, 13,  15, 12, 14,
+    16, 18, 17,  16, 19, 18,
+    22, 20, 21,  23, 20, 22
+};
     sg_buffer ibuf = sg_make_buffer(&(sg_buffer_desc){
         .type = SG_BUFFERTYPE_INDEXBUFFER,
         .data = SG_RANGE(indices),
@@ -596,7 +618,7 @@ void init(void) {
         },
         .shader = shd,
         .index_type = SG_INDEXTYPE_UINT16,
-        .cull_mode = SG_CULLMODE_BACK,
+        .cull_mode = SG_CULLMODE_FRONT,
         .depth = {
             .write_enabled = true,
             .compare = SG_COMPAREFUNC_LESS_EQUAL,
@@ -815,10 +837,10 @@ void init(void) {
         .index_buffer = ibuf
     };
 
-    ecs.meshes[0].binding = (sg_bindings) {
-        .vertex_buffers[0] = ecs.meshes[0].vbuf,
-        .index_buffer = ecs.meshes[0].ibuf,
-    };
+    // ecs.meshes[1].binding = (sg_bindings) {
+    //     .vertex_buffers[0] = ecs.meshes[1].vbuf,
+    //     .index_buffer = ecs.meshes[1].ibuf,
+    // };
 }
 
 void camera_move(float dt) {

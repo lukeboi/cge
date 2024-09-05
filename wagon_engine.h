@@ -53,9 +53,9 @@ typedef struct {
 } transform_c_t;
 
 typedef struct {
-    float _vertices[10000 * 3 * 8]; // Random big number, *should* be 10k verts, TODO malloc
-    uint16_t _indices[10000 * 8]; // Index values, random big number, TODO malloc
-    unsigned _verticies_size;
+    float* _vertices;
+    uint16_t* _indices;
+    unsigned _vertices_size;
     unsigned _indices_size;
     unsigned face_count;
     sg_buffer vbuf;
@@ -78,7 +78,6 @@ static struct {
     transform_c_t transforms[NUM_COMPONENTS];
     
     // Object mesh buffer
-    // TODO this should be malloced
     bool mesh_valid[NUM_COMPONENTS];
     mesh_c_t meshes[NUM_COMPONENTS];
 
@@ -256,8 +255,88 @@ void get_dir_from_file(const char *file_path, char *dir_path, size_t size) {
     }
 }
 
-// Sokol init
+void cleanup_ecs(void);
+void update_mesh(int index, float* vertices, unsigned vertices_size, uint16_t* indices, unsigned indices_size, unsigned face_count);
+
+
+void cleanup_ecs(void) {
+    for (int i = 0; i < NUM_COMPONENTS; i++) {
+        if (ecs.mesh_valid[i]) {
+            free(ecs.meshes[i]._vertices);
+            free(ecs.meshes[i]._indices);
+        }
+    }
+    free(ecs.mesh_valid);
+    free(ecs.meshes);
+}
+
+void update_mesh(int index, float* positions, unsigned position_count, uint16_t* indices, unsigned indices_size, unsigned face_count) {
+    // ecs.mesh_valid[index] = true;
+    mesh_c_t* mesh = &ecs.meshes[index];
+
+    // Free existing data if any
+    if (mesh->_vertices) free(mesh->_vertices);
+    if (mesh->_indices) free(mesh->_indices);
+
+    // Calculate new sizes
+    unsigned vertices_size = position_count * 7; // 3 for position, 4 for color
+    mesh->_vertices_size = vertices_size;
+    mesh->_indices_size = indices_size;
+    mesh->face_count = face_count;
+
+    // Allocate new memory
+    mesh->_vertices = (float*)malloc(vertices_size * sizeof(float));
+    mesh->_indices = (uint16_t*)malloc(indices_size * sizeof(uint16_t));
+
+    if (!mesh->_vertices || !mesh->_indices) {
+        // Handle memory allocation failure
+        if (mesh->_vertices) free(mesh->_vertices);
+        if (mesh->_indices) free(mesh->_indices);
+        mesh->_vertices = NULL;
+        mesh->_indices = NULL;
+        ecs.mesh_valid[index] = false;
+        return;
+    }
+
+    // Copy and format vertex data
+    float red_rgba[] = { 1.0f, 0.0f, 0.0f, 1.0f };
+    for (unsigned i = 0; i < position_count; i++) {
+        unsigned dest_pos = i * 7;
+        unsigned src_pos = i * 3;
+        
+        // Copy position (XYZ)
+        mesh->_vertices[dest_pos] = positions[src_pos];
+        mesh->_vertices[dest_pos + 1] = positions[src_pos + 1];
+        mesh->_vertices[dest_pos + 2] = positions[src_pos + 2];
+        
+        // Copy color (RGBA)
+        memcpy(&mesh->_vertices[dest_pos + 3], red_rgba, 4 * sizeof(float));
+    }
+
+    // Copy index data
+    memcpy(mesh->_indices, indices, indices_size * sizeof(uint16_t));
+
+    // Update Sokol buffers
+    mesh->vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .data = (sg_range){ mesh->_vertices, vertices_size * sizeof(float) },
+        .label = "mesh-vertices"
+    });
+    mesh->ibuf = sg_make_buffer(&(sg_buffer_desc){
+        .type = SG_BUFFERTYPE_INDEXBUFFER,
+        .data = (sg_range){ mesh->_indices, indices_size * sizeof(uint16_t) },
+        .label = "mesh-indices"
+    });
+
+    // Update bindings
+    mesh->binding = (sg_bindings) {
+        .vertex_buffers[0] = mesh->vbuf,
+        .index_buffer = mesh->ibuf,
+    };
+}
+
+// Modify the init function
 void init(void) {
+
     // Used for relative paths on default font and mesh
     char dir_path[1024];
     get_dir_from_file(__FILE__, dir_path, sizeof(dir_path));
@@ -358,43 +437,29 @@ void init(void) {
     printf("hih\n");
 
     printf("MESHY LOAD LOAD");
-
-    for(int i = 0; i < mesh->index_count; i++) {
+    // update_mesh(2, mesh->positions, mesh->position_count, (uint16_t*)mesh->indices, mesh->index_count, mesh->face_count);
+    ecs.meshes[0]._indices_size = mesh->index_count;
+    ecs.meshes[0]._indices = (uint16_t*)malloc(ecs.meshes[0]._indices_size * sizeof(uint16_t));
+    if (!ecs.meshes[0]._indices) {
+        // Handle allocation failure
+        printf("Failed to allocate memory for mesh indices!");
+        return;
+    }
+    for (int i = 0; i < mesh->index_count; i++) {
         printf("= %d\n", mesh->indices[i].p);
         ecs.meshes[0]._indices[i] = mesh->indices[i].p;
     }
-    ecs.meshes[0]._indices_size = mesh->index_count;
     ecs.meshes[0].face_count = mesh->face_count;
 
     {
         unsigned int i = 0; // Keep i def outside loop to use it to get size
-        // for (i = 0; i < mesh->face_count * 3; ++i) {
-        //     fastObjIndex vertex = mesh->indices[i];
 
-        //     // unsigned int v_pos = vertex.p * 3;
-        //     unsigned int v_pos = vertex.p;
-        //     unsigned int n_pos = vertex.n * 3;
-        //     unsigned int t_pos = vertex.t * 2;
-
-        //     // // From opengl tutorial
-        //     // unsigned int pos = i * 8;
-
-        //     // memcpy(ecs.meshes[0].vertices + pos, mesh->positions + v_pos, 3 * sizeof(float));
-        //     // memcpy(ecs.meshes[0].vertices + pos + 3, mesh->normals + n_pos, 3 * sizeof(float));
-        //     // memcpy(ecs.meshes[0].vertices + pos + 6, mesh->texcoords + t_pos, 2 * sizeof(float));
-
-        //     // From cube shader
-        //     unsigned int pos = i * 7;
-        //     float red_rgba[] = { 1.0f, 0.0f, 0.0f, 1.0f };
-        //     float testval[] = { 0.8f };
-        //     memcpy(ecs.meshes[0].vertices + pos, mesh->positions + v_pos, 3 * sizeof(float)); // XYZ point
-        //     memcpy(ecs.meshes[0].vertices + pos + 3, red_rgba, 4 * sizeof(float)); // Color, just make it all red
-        //     // memcpy(ecs.meshes[0].vertices + pos, testval, 1 * sizeof(float)); // Color, just make it all red
-        //     // printf("= pos %d\n", pos);
-        // }
-
-        for (int j = 0; j < mesh->position_count * 3 + 3; j++) {
-            printf("%.2f\n", mesh->positions[j]);
+        ecs.meshes[0]._vertices_size = mesh->position_count * 7; // 3 for position, 4 for color
+        ecs.meshes[0]._vertices = (float*)malloc(ecs.meshes[0]._vertices_size * sizeof(float));
+        if (!ecs.meshes[0]._vertices) {
+            // Handle allocation failure
+            printf("Failed to allocate memory for mesh vertices!");
+            return;
         }
 
         for (i = 0; i < mesh->position_count; i++) {
@@ -408,7 +473,7 @@ void init(void) {
             // memcpy(ecs.meshes[0].vertices + pos, mesh->positions + pos, 3 * sizeof(float)); // XYZ point
             memcpy(ecs.meshes[0]._vertices + pos + 3, red_rgba, 4 * sizeof(float)); // Color, just make it all red
         }
-        
+
         ecs.mesh_valid[0] = true;
 
         for (int k = 0; k < i * 7; k++) {
@@ -416,18 +481,18 @@ void init(void) {
                 printf("\n");
             }
             if (ecs.meshes[0]._vertices[k] >= 0.0f)
-                printf(" "); 
+                printf(" ");
             printf("%.2f, ", ecs.meshes[0]._vertices[k]);
         }
 
         ecs.meshes[0].vbuf = sg_make_buffer(&(sg_buffer_desc){
-            .data = (sg_range){ &ecs.meshes[0]._vertices, i * 7 * sizeof(float) },
+            .data = (sg_range){ ecs.meshes[0]._vertices, i * 7 * sizeof(float) },
             .label = "mesh-vertices"
         });
 
         ecs.meshes[0].ibuf = sg_make_buffer(&(sg_buffer_desc){
             .type = SG_BUFFERTYPE_INDEXBUFFER,
-            .data = (sg_range){ &ecs.meshes[0]._indices, ecs.meshes[0]._indices_size * sizeof(uint16_t) },
+            .data = (sg_range){ ecs.meshes[0]._indices, ecs.meshes[0]._indices_size * sizeof(uint16_t) },
             .label = "mesh-indices"
         });
 
@@ -1032,8 +1097,9 @@ void frame(void) {
 }
 
 void cleanup(void) {
-    fast_obj_destroy(mesh);
+    // fast_obj_destroy(mesh);
 
+    cleanup_ecs();
     simgui_shutdown();
     sg_shutdown();
 }
